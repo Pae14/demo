@@ -1,0 +1,16 @@
+.venv/
+**/.venv/
+venv/
+**/venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+**/.pytest_cache/
+**/*.egg-info/
+**/build/
+**/install/
+**/log/
+viewer_project/.git/
+viewer_project/FETCH_HEAD
+viewer_project/exports/
+.vscode/

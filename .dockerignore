@@ -1,0 +1,15 @@
+.git
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.venv/
+**/venv/
+ros2_vbtsensors/build/
+ros2_vbtsensors/install/
+ros2_vbtsensors/log/
+viewer_project/build/
+viewer_project/install/
+viewer_project/log/
+viewer_project/exports/
+viewer_project/models/
+viewer_project/data/

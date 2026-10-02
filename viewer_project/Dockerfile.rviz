@@ -1,0 +1,10 @@
+FROM ros:humble-ros-base-jammy
+
+ENV QT_X11_NO_MITSHM=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-humble-rviz2 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /rviz
+CMD ["rviz2", "-d", "/rviz/gs_pointcloud.rviz"]

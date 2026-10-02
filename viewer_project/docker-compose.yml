@@ -1,0 +1,42 @@
+services:
+  viewer:
+    build:
+      context: ..
+      dockerfile: viewer_project/Dockerfile
+      network: host
+    image: tactile-defect-viewer:humble
+    working_dir: /app
+    command: ["python3", "main.py"]
+    network_mode: host
+    ipc: host
+    environment:
+      DISPLAY: ${DISPLAY:-:0}
+      QT_X11_NO_MITSHM: "1"
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+      RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - /dev/bus/usb:/dev/bus/usb:rw
+      - ./models:/app/models:ro
+      - ./data:/app/data:ro
+      - ./exports:/app/exports:rw
+    devices:
+      - ${CAMERA_DEVICE:-/dev/video0}:${CAMERA_DEVICE:-/dev/video0}
+    stdin_open: true
+    tty: true
+
+  rviz:
+    build:
+      context: ..
+      dockerfile: viewer_project/Dockerfile.rviz
+    image: tactile-rviz:humble
+    network_mode: host
+    environment:
+      DISPLAY: ${DISPLAY:-:0}
+      QT_X11_NO_MITSHM: "1"
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+      RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ./rviz/gs_pointcloud.rviz:/rviz/gs_pointcloud.rviz:ro
+    command: ["rviz2", "-d", "/rviz/gs_pointcloud.rviz"]
