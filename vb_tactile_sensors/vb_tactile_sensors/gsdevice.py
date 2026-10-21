@@ -2,6 +2,45 @@ import cv2
 import numpy as np
 import os
 import re
+import shutil
+import subprocess
+
+
+class _FFmpegCapture:
+    def __init__(self, process, width, height):
+        self.process = process
+        self.width = width
+        self.height = height
+        self.frame_bytes = width * height * 3
+        self._reported_exit = False
+
+    def read(self):
+        if self.process.stdout is None:
+            return False, None
+        raw_frame = self.process.stdout.read(self.frame_bytes)
+        if len(raw_frame) != self.frame_bytes:
+            if not self._reported_exit and self.process.poll() is not None:
+                print(
+                    f'FFmpeg camera capture exited with status '
+                    f'{self.process.returncode}'
+                )
+                self._reported_exit = True
+            return False, None
+        frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape(
+            self.height, self.width, 3
+        )
+        return True, frame
+
+    def release(self):
+        if self.process.poll() is None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait()
+        if self.process.stdout is not None:
+            self.process.stdout.close()
 
 def warp_perspective(img, corners, output_sz):
     TOPLEFT, TOPRIGHT, BOTTOMRIGHT, BOTTOMLEFT = corners
@@ -32,15 +71,64 @@ class Camera:
         self.imgw = 320 # this is for R1, R1.5 is 240
         self.imgh = 240 # this is for R1, R1.5 is 320
         self.cam = None
+        self._frame_is_resized = False
         self.while_condition = 1
 
     def connect(self):
 
-        # The camera in Mini is a USB camera and uses open cv to get the video data from the streamed video
-        dev = 2
-        self.cam = cv2.VideoCapture(dev, cv2.CAP_V4L2)
-        if self.cam is None or not self.cam.isOpened():
-            print('Warning: unable to open video source: ', dev)
+        dev = os.environ.get("CAMERA_DEVICE", "/dev/video0")
+        ffmpeg = shutil.which('ffmpeg')
+        if ffmpeg and (
+            dev.startswith('/dev/video') or dev.isdigit()
+        ):
+            device_path = (
+                f'/dev/video{dev}' if dev.isdigit() else dev
+            )
+            width, height = 320, 240
+            crop_and_scale = (
+                'crop=iw-2*floor(iw/7):ih-2*floor(ih/7)-2:'
+                'floor(iw/7):floor(ih/7)+2,'
+                f'scale={width}:{height}:flags=bilinear,format=bgr24'
+            )
+            self.cam = _FFmpegCapture(
+                subprocess.Popen(
+                    [
+                        ffmpeg,
+                        '-hide_banner',
+                        '-loglevel', 'warning',
+                        '-fflags', 'nobuffer',
+                        '-thread_queue_size', '1',
+                        '-f', 'v4l2',
+                        '-input_format', 'mjpeg',
+                        '-framerate', '25',
+                        '-i', device_path,
+                        '-vf', crop_and_scale,
+                        '-vsync', '0',
+                        '-f', 'rawvideo',
+                        '-pix_fmt', 'bgr24',
+                        'pipe:1',
+                    ],
+                    stdout=subprocess.PIPE,
+                ),
+                width,
+                height,
+            )
+            self._frame_is_resized = True
+            print(
+                f'Camera capture: FFmpeg MJPEG from {device_path}, '
+                f'25 FPS requested, output {width}x{height}'
+            )
+        else:
+            video_index = dev.removeprefix("/dev/video")
+            if dev.startswith("/dev/video") and video_index.isdigit():
+                self.cam = cv2.VideoCapture(int(video_index), cv2.CAP_V4L2)
+            else:
+                self.cam = cv2.VideoCapture(dev)
+            self.cam.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            if self.cam is None or not self.cam.isOpened():
+                print('Warning: unable to open video source: ', dev)
+            elif not ffmpeg:
+                print('Warning: ffmpeg not found; using OpenCV camera capture')
         self.imgw = 240
         self.imgh = 320
 
@@ -51,7 +139,8 @@ class Camera:
             ret, f0 = self.cam.read()
         ret, f0 = self.cam.read()
         if ret:
-            f0 = resize_crop_mini(f0,self.imgh,self.imgw)
+            if not self._frame_is_resized:
+                f0 = resize_crop_mini(f0,self.imgh,self.imgw)
         else:
             print('ERROR! reading image from camera')
 
@@ -63,7 +152,8 @@ class Camera:
 
         ret, f0 = self.cam.read()
         if ret:
-            f0 = resize_crop_mini(f0, self.imgh, self.imgw)
+            if not self._frame_is_resized:
+                f0 = resize_crop_mini(f0, self.imgh, self.imgw)
         else:
             print('ERROR! reading image from camera!')
 
@@ -82,7 +172,4 @@ class Camera:
 
     def stop_video(self):
         cv2.destroyAllWindows()
-
-
-
 

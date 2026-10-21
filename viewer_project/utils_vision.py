@@ -98,9 +98,78 @@ def _exceeds_repair_depth(metrics):
     return threshold is not None and depth_p95 is not None and depth_p95 > threshold
 
 
+def _repairable_3d(class_id, metrics):
+    """True/False from the exploratory 3D thresholds, None without depth data."""
+    limits = REPAIR_3D_THRESHOLDS.get(int(class_id))
+    if not limits or metrics.get('depth_p95_mm') is None:
+        return None
+    return not any(
+        metrics.get(key) is not None and metrics[key] > limit
+        for key, limit in limits.items()
+    )
+
+
+def _status_3d(has_defect, repairable_flags):
+    flags = [f for f in repairable_flags if f is not None]
+    if not has_defect or not flags:
+        return None
+    return _get_status(True, all(flags))
+
+
 def _format_depth_metric(metrics, key):
     value = metrics.get(key)
     return f'{value:.3f}' if value is not None else '—'
+
+
+def _repairability_feature_line(class_id, metrics):
+    profiles = {
+        3: (
+            'Holes',
+            (
+                ('Area', 'area_mm2', 'mm²', 1),
+                ('P95 depth', 'depth_p95_mm', 'mm', 3),
+                ('Max depth', 'depth_max_mm', 'mm', 3),
+                ('Volume', 'depth_volume_mm3', 'mm³', 3),
+            ),
+        ),
+        1: (
+            'Crack',
+            (
+                ('Length', 'major_axis_length_mm', 'mm', 2),
+                ('Width', 'minor_axis_length_mm', 'mm', 2),
+                ('Area', 'area_mm2', 'mm²', 1),
+                ('P95 depth', 'depth_p95_mm', 'mm', 3),
+            ),
+        ),
+        0: (
+            'Abrasion',
+            (
+                ('Area', 'area_mm2', 'mm²', 1),
+                ('P95 depth', 'depth_p95_mm', 'mm', 3),
+                ('Max depth', 'depth_max_mm', 'mm', 3),
+                ('Volume', 'depth_volume_mm3', 'mm³', 3),
+            ),
+        ),
+        2: (
+            'Friction',
+            (
+                ('Area', 'area_mm2', 'mm²', 1),
+                ('P95 depth', 'depth_p95_mm', 'mm', 3),
+                ('Max depth', 'depth_max_mm', 'mm', 3),
+                ('Volume', 'depth_volume_mm3', 'mm³', 3),
+            ),
+        ),
+    }
+    profile = profiles.get(int(class_id))
+    if profile is None:
+        return ''
+    class_name, selected_metrics = profile
+    values = []
+    for label, key, unit, precision in selected_metrics:
+        value = metrics.get(key)
+        formatted = f'{value:.{precision}f} {unit}' if value is not None else '—'
+        values.append(f'{label}: {formatted}')
+    return f'{class_name}: ' + ' · '.join(values)
 
 
 def _compute_metrics(mask_bool, gray_img, point_cloud=None):
@@ -110,6 +179,20 @@ def _compute_metrics(mask_bool, gray_img, point_cloud=None):
 
     area_px   = float(np.sum(mask_bool))
     area_mm2  = area_px * mm2_per_pixel
+    ys, xs = np.where(mask_bool)
+    major_axis_length_mm = 0.0
+    minor_axis_length_mm = 0.0
+    if len(xs) > 1:
+        coords_mm = np.column_stack((
+            xs.astype(np.float64) * (GS_FOV_W_MM / w),
+            ys.astype(np.float64) * (GS_FOV_H_MM / h),
+        ))
+        centered = coords_mm - coords_mm.mean(axis=0)
+        _, _, axes = np.linalg.svd(centered, full_matrices=False)
+        projections = centered @ axes.T
+        extents = np.ptp(projections, axis=0)
+        major_axis_length_mm = float(np.max(extents))
+        minor_axis_length_mm = float(np.min(extents))
 
     eccentricity  = 0.0
     perimeter_mm  = 0.0
@@ -168,6 +251,8 @@ def _compute_metrics(mask_bool, gray_img, point_cloud=None):
     metrics = {
         "area_mm2":         area_mm2,
         "perimeter_mm":     perimeter_mm,
+        "major_axis_length_mm": major_axis_length_mm,
+        "minor_axis_length_mm": minor_axis_length_mm,
         "eccentricity":     eccentricity,
         "compactation":     compactation,
         "glcm_homogeneity": glcm_homogeneity,
@@ -193,6 +278,7 @@ def _draw_yolo(bgr, result, names, point_cloud=None):
         return img, "NO DEFECTS", (155, 160, 165), None
 
     is_repairable = True
+    flags_3d = []
     has_defect = False
     
     n_list, c_list = [], []
@@ -200,6 +286,7 @@ def _draw_yolo(bgr, result, names, point_cloud=None):
     homo_list, ener_list, ent_list = [], [], []
     depth_mean_list, depth_p95_list = [], []
     depth_max_list, depth_volume_list = [], []
+    profile_list = []
     first_color = (180, 180, 180)
 
     for cid in np.unique(result.boxes.cls.cpu().numpy()):
@@ -238,6 +325,7 @@ def _draw_yolo(bgr, result, names, point_cloud=None):
             elif int(cid) == 2: # Scratch-Friction
                 if energia < 0.04 or entropia > 8.75:
                     defect_repairable = False
+            flags_3d.append(_repairable_3d(cid, metrics))
             if _exceeds_repair_depth(metrics):
                 defect_repairable = False
 
@@ -275,6 +363,7 @@ def _draw_yolo(bgr, result, names, point_cloud=None):
                 depth_p95_list.append(_format_depth_metric(metrics, 'depth_p95_mm'))
                 depth_max_list.append(_format_depth_metric(metrics, 'depth_max_mm'))
                 depth_volume_list.append(_format_depth_metric(metrics, 'depth_volume_mm3'))
+                profile_list.append(_repairability_feature_line(int(cid), metrics))
 
     last_metrics = None
     if has_defect and n_list:
@@ -292,6 +381,8 @@ def _draw_yolo(bgr, result, names, point_cloud=None):
             "depth_p95_mm": " | ".join(depth_p95_list),
             "depth_max_mm": " | ".join(depth_max_list),
             "depth_volume_mm3": " | ".join(depth_volume_list),
+            "class_specific_metrics": "\n".join(profile_list),
+            "status_3d": _status_3d(has_defect, flags_3d),
             "color": first_color
         }
 
@@ -318,11 +409,13 @@ def _draw_dinov3(bgr, class_probabilities, confidence_threshold=0.25, point_clou
     overlay = np.zeros_like(img)
     has_defect = False
     is_repairable = True
+    flags_3d = []
     n_list, c_list = [], []
     area_list, perim_list, ecc_list, comp_list = [], [], [], []
     homo_list, ener_list, ent_list = [], [], []
     depth_mean_list, depth_p95_list = [], []
     depth_max_list, depth_volume_list = [], []
+    profile_list = []
     first_color = (180, 180, 180)
 
     for cid in range(4):
@@ -352,6 +445,7 @@ def _draw_dinov3(bgr, class_probabilities, confidence_threshold=0.25, point_clou
             elif cid == 2:
                 if energy < 0.04 or entropy > 8.75:
                     defect_repairable = False
+            flags_3d.append(_repairable_3d(cid, metrics))
             if _exceeds_repair_depth(metrics):
                 defect_repairable = False
             if not defect_repairable:
@@ -380,6 +474,7 @@ def _draw_dinov3(bgr, class_probabilities, confidence_threshold=0.25, point_clou
             depth_p95_list.append(_format_depth_metric(metrics, 'depth_p95_mm'))
             depth_max_list.append(_format_depth_metric(metrics, 'depth_max_mm'))
             depth_volume_list.append(_format_depth_metric(metrics, 'depth_volume_mm3'))
+            profile_list.append(_repairability_feature_line(cid, metrics))
 
     if not has_defect:
         return img, 'NO DEFECTS', (155, 160, 165), None
@@ -399,6 +494,8 @@ def _draw_dinov3(bgr, class_probabilities, confidence_threshold=0.25, point_clou
         'depth_p95_mm': ' | '.join(depth_p95_list),
         'depth_max_mm': ' | '.join(depth_max_list),
         'depth_volume_mm3': ' | '.join(depth_volume_list),
+        'class_specific_metrics': '\n'.join(profile_list),
+        'status_3d': _status_3d(has_defect, flags_3d),
         'color': first_color,
     }
     status_text, status_color = _get_status(has_defect, is_repairable)
@@ -418,6 +515,7 @@ def _draw_rfdetr(bgr, preds, point_cloud=None):
         return img, "NO DEFECTS", (155, 160, 165), None
 
     is_repairable = True
+    flags_3d = []
     has_defect = False
     
     n_list, c_list = [], []
@@ -425,6 +523,7 @@ def _draw_rfdetr(bgr, preds, point_cloud=None):
     homo_list, ener_list, ent_list = [], [], []
     depth_mean_list, depth_p95_list = [], []
     depth_max_list, depth_volume_list = [], []
+    profile_list = []
     first_color = (180, 180, 180)
 
     for cid in np.unique(preds.class_id):
@@ -463,6 +562,7 @@ def _draw_rfdetr(bgr, preds, point_cloud=None):
             elif int(cid) == 2: # Scratch-Friction
                 if energia < 0.04 or entropia > 8.75:
                     defect_repairable = False
+            flags_3d.append(_repairable_3d(cid, metrics))
             if _exceeds_repair_depth(metrics):
                 defect_repairable = False
 
@@ -500,6 +600,7 @@ def _draw_rfdetr(bgr, preds, point_cloud=None):
                 depth_p95_list.append(_format_depth_metric(metrics, 'depth_p95_mm'))
                 depth_max_list.append(_format_depth_metric(metrics, 'depth_max_mm'))
                 depth_volume_list.append(_format_depth_metric(metrics, 'depth_volume_mm3'))
+                profile_list.append(_repairability_feature_line(int(cid), metrics))
 
     last_metrics = None
     if has_defect and n_list:
@@ -517,6 +618,8 @@ def _draw_rfdetr(bgr, preds, point_cloud=None):
             "depth_p95_mm": " | ".join(depth_p95_list),
             "depth_max_mm": " | ".join(depth_max_list),
             "depth_volume_mm3": " | ".join(depth_volume_list),
+            "class_specific_metrics": "\n".join(profile_list),
+            "status_3d": _status_3d(has_defect, flags_3d),
             "color": first_color
         }
 

@@ -9,6 +9,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    cmake \
     libdbus-1-3 \
     libegl1 \
     libfontconfig1 \
@@ -29,6 +30,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxcb-xkb1 \
     python3-colcon-common-extensions \
     python3-pip \
+    libpcl-dev \
     ros-humble-cv-bridge \
     ros-humble-sensor-msgs \
     ros-humble-std-msgs \
@@ -45,6 +47,12 @@ RUN python3 -m pip install --no-cache-dir \
     -r /tmp/requirements.txt
 
 COPY viewer_project/ /app/
+COPY viewer_project/pcl_descriptor_export/ /tmp/pcl_descriptor_export/
+RUN cmake -S /tmp/pcl_descriptor_export -B /tmp/pcl_descriptor_export/build \
+    -DCMAKE_BUILD_TYPE=Release \
+    && cmake --build /tmp/pcl_descriptor_export/build --parallel \
+    && install -m 0755 /tmp/pcl_descriptor_export/build/pcl_descriptor_export \
+        /usr/local/bin/pcl_descriptor_export
 COPY vb_tactile_sensors/ /ros2_ws/src/vb_tactile_sensors/
 
 WORKDIR /ros2_ws
@@ -53,6 +61,9 @@ RUN source /opt/ros/humble/setup.bash \
 
 COPY viewer_project/docker/entrypoint.sh /usr/local/bin/tactile-entrypoint
 RUN chmod +x /usr/local/bin/tactile-entrypoint
+
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 ENTRYPOINT ["/usr/local/bin/tactile-entrypoint"]

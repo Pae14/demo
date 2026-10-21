@@ -7,6 +7,8 @@ from cv_bridge import CvBridge, CvBridgeError
 import cv2
 import numpy as np
 import torch
+import threading
+import time
 from vb_tactile_sensors import gsdevice, gs3drecon
 
 import os
@@ -23,8 +25,6 @@ class CameraPublisher(Node):
 		self.dev = gsdevice.Camera("Gelsight Mini")
 		self.dev.connect()
 
-		# image
-		self.timer = self.create_timer(0.04, self.publish_image_pcd)
 		self.cvbridge = CvBridge()
 
 		# pointcloud - load model
@@ -34,17 +34,91 @@ class CameraPublisher(Node):
 		self.nn = gs3drecon.Reconstruction3D(self.dev)
 		self.nn.load_nn(net_path, device)
 
-
 		# pointcloud - store data points
 		mmpp = 0.0634  # mini gel 18x24mm at 240x320
 		self.mpp = mmpp / 1000.
 		self.frame_id = 'gelsightmini_camera_frame'
+		self._depth_condition = threading.Condition()
+		self._pending_depth_frame = None
+		self._depth_worker_running = True
+		self._depth_update_interval = 0.2
+		self._last_depth_frame_queued = 0.0
+		self._capture_lock = threading.Lock()
+		self._capture_running = True
+		self._latest_frame = None
+		self._latest_frame_sequence = 0
+		self._published_frame_sequence = 0
+		self._capture_thread = threading.Thread(
+			target=self._capture_frames,
+			name='gelsight-camera-capture',
+			daemon=True,
+		)
+		self._capture_thread.start()
+		self._depth_worker = threading.Thread(
+			target=self._process_depth_frames,
+			name='gelsight-depth-worker',
+			daemon=True,
+		)
+		self._depth_worker.start()
+		self.timer = self.create_timer(1.0 / 30.0, self.publish_image)
 
 
-	def publish_image_pcd(self):
+	def publish_image(self):
+		with self._capture_lock:
+			if (
+				self._latest_frame is None
+				or self._latest_frame_sequence == self._published_frame_sequence
+			):
+				return
+			img = self._latest_frame.copy()
+			self._published_frame_sequence = self._latest_frame_sequence
 
-		# create img msg and publish
-		img = self.dev.get_image()
+		stamp = self.get_clock().now().to_msg()
+		img_msg = self.cvbridge.cv2_to_imgmsg(img, encoding="bgr8")
+		img_msg.header = Header(stamp=stamp, frame_id=self.frame_id)
+		self.pub_img.publish(img_msg)
+
+		now = time.monotonic()
+		if now - self._last_depth_frame_queued < self._depth_update_interval:
+			return
+		self._last_depth_frame_queued = now
+
+		with self._depth_condition:
+			self._pending_depth_frame = (img.copy(), stamp)
+			self._depth_condition.notify()
+
+	def _capture_frames(self):
+		while self._capture_running:
+			img = self.dev.get_image()
+			if img is None:
+				time.sleep(0.01)
+				continue
+			with self._capture_lock:
+				self._latest_frame = img
+				self._latest_frame_sequence += 1
+
+
+	def _process_depth_frames(self):
+		while True:
+			with self._depth_condition:
+				self._depth_condition.wait_for(
+					lambda: (
+						self._pending_depth_frame is not None
+						or not self._depth_worker_running
+					)
+				)
+				if not self._depth_worker_running:
+					return
+				img, stamp = self._pending_depth_frame
+				self._pending_depth_frame = None
+
+			try:
+				self._publish_depth_pcd(img, stamp)
+			except Exception as exc:
+				self.get_logger().error(f'Depth reconstruction failed: {exc}')
+
+
+	def _publish_depth_pcd(self, img, stamp):
 		depth_map = self.nn.get_depthmap(img, False)
 		if depth_map.shape != img.shape[:2]:
 			self.get_logger().error(
@@ -61,12 +135,6 @@ class CameraPublisher(Node):
 			depth_map_m,
 		), axis=-1)
 		data = point_cloud.astype(np.float32, copy=False).tobytes()
-		stamp = self.get_clock().now().to_msg()
-
-		img_msg = self.cvbridge.cv2_to_imgmsg(img, encoding="passthrough")
-		img_msg.header = Header(stamp=stamp, frame_id=self.frame_id)
-
-		self.pub_img.publish(img_msg)
 
 		# create pcd msg and publish
 		ros_dtype = PointField.FLOAT32
@@ -113,6 +181,22 @@ class CameraPublisher(Node):
 		# Publicar la imagen en ROS2
 		self.publisher_.publish(ros_image)
 
+	def destroy_node(self):
+		self._capture_running = False
+		self._capture_thread.join(timeout=2.0)
+		if self._capture_thread.is_alive():
+			if self.dev.cam is not None:
+				self.dev.cam.release()
+			self._capture_thread.join(timeout=1.0)
+			if self._capture_thread.is_alive():
+				self.get_logger().error('Camera capture thread did not stop cleanly')
+		with self._depth_condition:
+			self._depth_worker_running = False
+			self._depth_condition.notify_all()
+		self._depth_worker.join()
+		if self.dev.cam is not None:
+			self.dev.cam.release()
+		super().destroy_node()
 
 
 def main(args=None):
@@ -121,11 +205,11 @@ def main(args=None):
 
 	camera_publisher = CameraPublisher()
 
-	rclpy.spin(camera_publisher)
-
-	camera_publisher.destroy_node()
-
-	rclpy.shutdown()
+	try:
+		rclpy.spin(camera_publisher)
+	finally:
+		camera_publisher.destroy_node()
+		rclpy.shutdown()
 
 
 if __name__ == '__main__':

@@ -192,6 +192,7 @@ class TopMetricsBar(QWidget):
             depth_grid.addWidget(container, row, col)
             self._depth_items[key] = value
         depth_layout.addLayout(depth_grid)
+
         
         self._lay.addWidget(self.class_card)
         self._lay.addWidget(self.shape_card)
@@ -204,7 +205,8 @@ class TopMetricsBar(QWidget):
         self.class_dot.setStyleSheet("font-size: 16px; color: #b09488; background:transparent; border:none;")
         for val in self._shape_items.values(): val.setText("—")
         for val in self._texture_items.values(): val.setText("—")
-        self.class_card.hide(); self.shape_card.hide(); self.texture_card.hide(); self.depth_card.hide()
+        self.class_card.hide(); self.shape_card.hide(); self.texture_card.hide()
+        self.depth_card.hide()
     
     def update_metrics(self, m: dict):
         if not m: 
@@ -259,15 +261,27 @@ class ImgPanel(QWidget):
         dot = _lbl("●", 10, 400, self._acc); dot.setFixedWidth(12)
         self._tlbl = _lbl(title, 11, 600, P["text2"])
         self._status_badge = StatusBadge()
-        hr.addWidget(dot); hr.addWidget(self._tlbl); hr.addStretch(); hr.addWidget(self._status_badge); cl.addLayout(hr)
+        self._status_badge_3d = StatusBadge()
+        hr.addWidget(dot); hr.addWidget(self._tlbl); hr.addStretch(); hr.addWidget(self._status_badge); hr.addWidget(self._status_badge_3d); cl.addLayout(hr)
         ln = QFrame(); ln.setFixedHeight(2); ln.setStyleSheet(f"background:qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 {self._acc},stop:0.55 rgba(220,100,80,0.25),stop:1 transparent); border:none;border-radius:1px;"); cl.addWidget(ln)
         self._metrics_bar = TopMetricsBar(); cl.addWidget(self._metrics_bar)
         self._il = QLabel(); self._il.setAlignment(Qt.AlignmentFlag.AlignCenter); self._il.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding); self._il.setMinimumHeight(200); cl.addWidget(self._il, 1)
         outer.addWidget(self._card, 1); self.setMinimumWidth(300); self.setMinimumHeight(500); self._ph()
 
+    @staticmethod
+    def _tag(text, prefix):
+        return text if text == "NO DEFECTS" else f"{prefix}: {text}"
+
+    def _set_3d(self, metrics):
+        status = metrics.get('status_3d') if metrics else None
+        if status:
+            self._status_badge_3d.set_status(self._tag(status[0], '3D'), status[1])
+        else:
+            self._status_badge_3d.hide()
+
     def _ph(self):
         self._pix = None; self._il.setPixmap(QPixmap()); self._il.setText("· · ·"); self._il.setStyleSheet(f"background:{P['bg']};border-radius:10px;border:none; color:{P['muted']};font-size:18px;letter-spacing:8px;")
-        self._status_badge.hide(); self._metrics_bar.reset()
+        self._status_badge.hide(); self._status_badge_3d.hide(); self._metrics_bar.reset()
 
     def set_image(self, arr, status_text="", status_color=(155,160,165), metrics=None, animated=True):
         if arr is None: self._ph(); return
@@ -279,8 +293,9 @@ class ImgPanel(QWidget):
             self._ref()
             self._il.setStyleSheet(f"background:{P['bg']};border-radius:10px;border:none;")
             self._il.setText("")
-            if status_text: self._status_badge.set_status(status_text, status_color)
+            if status_text: self._status_badge.set_status(self._tag(status_text, '2D'), status_color)
             else: self._status_badge.hide()
+            self._set_3d(metrics)
             self._metrics_bar.update_metrics(metrics)
             self._eff.setOpacity(1.0) # Forzamos opacidad máxima sin animar
             return
@@ -299,8 +314,9 @@ class ImgPanel(QWidget):
             h, w, c = a.shape
             self._pix = QPixmap.fromImage(QImage(a.data, w, h, w * c, QImage.Format.Format_RGB888))
             self._ref(); self._il.setStyleSheet(f"background:{P['bg']};border-radius:10px;border:none;"); self._il.setText("")
-            if self._pending_txt: self._status_badge.set_status(self._pending_txt, self._pending_col)
+            if self._pending_txt: self._status_badge.set_status(self._tag(self._pending_txt, '2D'), self._pending_col)
             else: self._status_badge.hide()
+            self._set_3d(self._pending_metrics)
             self._metrics_bar.update_metrics(self._pending_metrics)
         self._fade.setStartValue(0.1); self._fade.setEndValue(1.0); self._fade.start()
     def _ref(self):

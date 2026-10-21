@@ -457,6 +457,7 @@ class OnlineTab(QWidget):
         self.mr = mr; self._sb = sb; self._tb = tb
         self._th = None; self._lf = None; self._streaming = False
         self._last_seg_result = None; self._cloud_image = None; self._cloud_metrics = None
+        self._fusion_image = None; self._pcl_image = None; self._pcl_win = None
         self._sd = os.path.join(SAVE_DIR, "online"); self._lt = 0.0
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self._bsb(); self._btb(); self._bc()
@@ -465,7 +466,7 @@ class OnlineTab(QWidget):
         cam = self._sb.sec("Source Selection", open=True)
 
         self.src_cb = _combo()
-        self.src_cb.addItem("Local Camera", 0)
+        self.src_cb.addItem("Local Camera (V4L2)", 0)
         self.src_cb.addItem("ROS 2 Topic", 1)
         self.src_cb.currentIndexChanged.connect(self._on_src_changed)
         cam.add(self.src_cb)
@@ -492,11 +493,12 @@ class OnlineTab(QWidget):
         mdl = self._sb.sec("Detection model", open=True)
         self.mdl_cb = _combo(); [self.mdl_cb.addItem(v, k) for k, v in self.MDL.items()]
         self.mdl_cb.currentIndexChanged.connect(self._on_mdl); mdl.add(self.mdl_cb)
-
         out = self._sb.sec("Output view", open=True)
         self.view_cb = _combo()
         self.view_cb.addItem("Segmentation", 0)
         self.view_cb.addItem("Point cloud depth", 1)
+        self.view_cb.addItem("Depth + segmentation", 2)
+        self.view_cb.addItem("PCL normals (vectors)", 3)
         self.view_cb.currentIndexChanged.connect(self._on_view_changed)
         out.add(self.view_cb)
 
@@ -516,6 +518,7 @@ class OnlineTab(QWidget):
         for cid, name in CLASS_NAMES.items():
             b = PillBadge(name, CLASS_COLORS_RGB[cid]); det.add(b); self._sbadges[cid] = b
         self._sb.stretch()
+        self.src_cb.setCurrentIndex(1)
 
     def _btb(self):
         t = self._tb.lay()
@@ -525,6 +528,13 @@ class OnlineTab(QWidget):
         t.addStretch()
         self.cap_btn = PillBtn("Snapshot", accent=True); self.cap_btn.setFixedWidth(100)
         self.cap_btn.setEnabled(False); self.cap_btn.clicked.connect(self._cap); t.addWidget(self.cap_btn)
+        self.export_pcd_btn = PillBtn("Export PCD + PFH/SHOT", accent=True)
+        self.export_pcd_btn.setEnabled(False)
+        self.export_pcd_btn.clicked.connect(self._export_pointclouds)
+        t.addWidget(self.export_pcd_btn)
+        self.pcl_win_btn = PillBtn("PCL window", accent=True)
+        self.pcl_win_btn.clicked.connect(self._open_pcl_window)
+        t.addWidget(self.pcl_win_btn)
 
     def _bc(self):
         lay = QHBoxLayout(self); lay.setContentsMargins(18,14,18,14); lay.setSpacing(12)
@@ -546,7 +556,12 @@ class OnlineTab(QWidget):
         self.ros_fr.setVisible(is_ros)
         self._cloud_image = None
         self._cloud_metrics = None
-        if self.view_cb.currentData() == 1:
+        self._fusion_image = None
+        if hasattr(self, 'export_pcd_btn'):
+            self.export_pcd_btn.setEnabled(
+                self._streaming and is_ros and isinstance(self._th, ROS2Thread)
+            )
+        if self.view_cb.currentData() != 0:
             self._on_view_changed()
 
     def _start(self):
@@ -568,10 +583,14 @@ class OnlineTab(QWidget):
         self._th.result_ready.connect(self._on_result_ready)
         if isinstance(self._th, ROS2Thread):
             self._th.cloud_ready.connect(self._on_cloud_ready)
+            self._th.fusion_ready.connect(self._on_fusion_ready)
+            self._th.pcl_ready.connect(self._on_pcl_ready)
+            self._th.export_finished.connect(self._on_export_finished)
         self._th.det_classes.connect(self._on_det)
         self._th.status.connect(self._on_st)
         self._th.start(); self._streaming = True
         self.b_start.setEnabled(False); self.b_stop.setEnabled(True); self.cap_btn.setEnabled(True)
+        self.export_pcd_btn.setEnabled(isinstance(self._th, ROS2Thread))
         self.dot.setText("⬤  Connecting…")
         self.dot.setStyleSheet(f"color:{P['amber']};font-size:11px;background:transparent;border:none;font-family:'Inter','Segoe UI',sans-serif;")
 
@@ -589,6 +608,63 @@ class OnlineTab(QWidget):
                 img, "POINT CLOUD Z", (60, 170, 145), metrics, animated=False
             )
 
+    def _on_fusion_ready(self, img):
+        self._fusion_image = img
+        if self.view_cb.currentData() == 2:
+            if img is None:
+                self.res_p._ph()
+                return
+            self.res_p.set_image(
+                img, "DEPTH + SEGMENTATION", (60, 170, 145), animated=False
+            )
+
+    def _on_pcl_ready(self, img):
+        self._pcl_image = img
+        if self.view_cb.currentData() == 3 and img is not None:
+            self.res_p.set_image(img, "PCL NORMALS", (60, 170, 145), animated=False)
+        if self._pcl_win is not None and self._pcl_win.isVisible() and img is not None:
+            self._show_pcl_window_image(img)
+
+    def _show_pcl_window_image(self, img):
+        from PyQt6.QtGui import QImage, QPixmap
+        h, w = img.shape[:2]
+        qimg = QImage(img.data, w, h, 3 * w, QImage.Format.Format_RGB888).copy()
+        self._pcl_lbl.setPixmap(QPixmap.fromImage(qimg).scaled(
+            self._pcl_lbl.size(), Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation))
+
+    def _open_pcl_window(self):
+        from PyQt6.QtWidgets import QDialog
+        if self._pcl_win is None:
+            self._pcl_win = QDialog(self)
+            self._pcl_win.setWindowTitle("PCL processing - normals")
+            self._pcl_win.resize(1100, 460)
+            lay = QVBoxLayout(self._pcl_win)
+            self._pcl_lbl = QLabel("Waiting for synchronized point cloud...")
+            self._pcl_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lay.addWidget(self._pcl_lbl)
+        self._pcl_win.show(); self._pcl_win.raise_()
+        if self._pcl_image is not None:
+            self._show_pcl_window_image(self._pcl_image)
+
+    def _on_export_finished(self, message):
+        if message:
+            self.status_msg.emit(message)
+        self.export_pcd_btn.setEnabled(
+            self._streaming and isinstance(self._th, ROS2Thread)
+        )
+
+    def _export_pointclouds(self):
+        if not isinstance(self._th, ROS2Thread):
+            self.status_msg.emit("Start a ROS 2 stream with synchronized depth data first.")
+            return
+        output_root = os.path.join(SAVE_DIR, "pointclouds")
+        if not self._th.request_export(output_root):
+            self.status_msg.emit("A PCD export is already pending.")
+            return
+        self.export_pcd_btn.setEnabled(False)
+        self.status_msg.emit("Export queued; waiting for a synchronized depth cloud.")
+
     def _on_view_changed(self):
         if self.view_cb.currentData() == 0:
             self.res_p._tlbl.setText(f"Output: {self.MDL[self.mdl_cb.currentData()]}")
@@ -598,21 +674,46 @@ class OnlineTab(QWidget):
                 self.res_p._ph()
             return
 
-        self.res_p._tlbl.setText("Output: Point cloud depth")
-        if self._cloud_image is None:
+        if self.view_cb.currentData() == 1:
+            self.res_p._tlbl.setText("Output: Point cloud depth")
+            if self._cloud_image is None:
+                self.res_p._ph()
+                self.status_msg.emit("Waiting for synchronized /gs_mini_pcd data.")
+                return
+            self.res_p.set_image(
+                self._cloud_image, "POINT CLOUD Z", (60, 170, 145),
+                self._cloud_metrics, animated=False
+            )
+            return
+
+        if self.view_cb.currentData() == 3:
+            self.res_p._tlbl.setText("Output: PCL normals")
+            if self._pcl_image is None:
+                self.res_p._ph()
+                self.status_msg.emit("Waiting for image and point cloud with identical timestamps.")
+                return
+            self.res_p.set_image(self._pcl_image, "PCL NORMALS", (60, 170, 145), animated=False)
+            return
+
+        self.res_p._tlbl.setText("Output: Depth + segmentation")
+        if self._fusion_image is None:
             self.res_p._ph()
-            self.status_msg.emit("Waiting for synchronized /gs_mini_pcd data.")
+            self.status_msg.emit(
+                "Waiting for image and point cloud with identical timestamps."
+            )
             return
         self.res_p.set_image(
-            self._cloud_image, "POINT CLOUD Z", (60, 170, 145),
-            self._cloud_metrics, animated=False
+            self._fusion_image, "DEPTH + SEGMENTATION", (60, 170, 145),
+            animated=False
         )
 
     def _stop(self):
         if self._th: self._th.stop(); self._th.wait(3000); self._th = None
         self._streaming = False
         self._last_seg_result = None; self._cloud_image = None; self._cloud_metrics = None
+        self._fusion_image = None; self._pcl_image = None
         self.b_start.setEnabled(True); self.b_stop.setEnabled(False); self.cap_btn.setEnabled(False)
+        self.export_pcd_btn.setEnabled(False)
         self.dot.setText("⬤  Stopped")
         self.dot.setStyleSheet(f"color:{P['muted']};font-size:11px;background:transparent;border:none;font-family:'Inter','Segoe UI',sans-serif;")
         self.raw_p._ph(); self.res_p._ph(); self._on_det(set())
@@ -626,6 +727,9 @@ class OnlineTab(QWidget):
         if i is None: return
         if self.view_cb.currentData() == 0:
             self.res_p._tlbl.setText(f"Output: {self.MDL[i]}"); self.res_p._ph()
+        elif self.view_cb.currentData() == 2:
+            self._fusion_image = None
+            self._on_view_changed()
         if self._th: self._th.set_model(i)
 
     def _on_st(self, msg):

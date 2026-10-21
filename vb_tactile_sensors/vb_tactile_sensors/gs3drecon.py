@@ -324,10 +324,11 @@ class Reconstruction3D:
 
         ''' remove initial zero depth '''
         if self.dm_zero_counter < 50:
+            if self.dm_zero_counter == 0:
+                print('zeroing depth. do not touch the gel!')
             self.dm_zero += dm
-            print ('zeroing depth. do not touch the gel!')
             if self.dm_zero_counter == 49:
-                self.dm_zero /= self.dm_zero_counter
+                self.dm_zero /= 50
         if self.dm_zero_counter == 50:
             print ('Ok to touch me now!')
         self.dm_zero_counter += 1
@@ -423,7 +424,6 @@ class Visualize3D:
 
     def save_pointcloud(self):
         open3d.io.write_point_cloud(self.save_path + "pc_{}.pcd".format(self.cnt), self.pcd)
-
 
 
 

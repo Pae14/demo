@@ -7,6 +7,7 @@ Panels:
         - /Global Options1
         - /Status1
         - /Grid1
+        - /Camera Image1
         - /GelSight Point Cloud1
       Splitter Ratio: 0.5
     Tree Height: 480
@@ -49,6 +50,20 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /gs_mini_pcd
       Use Fixed Frame: true
+      Value: true
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Image Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /gs_mini_img
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: Camera Image
+      Normalize Range: true
       Value: true
   Enabled: true
   Global Options:

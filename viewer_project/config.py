@@ -37,9 +37,23 @@ SAVE_DIR       = os.path.join(BASE_DIR, 'exports')
 CONF_THRESHOLD = 0.25
 # Set after validating the repair process against calibrated depth samples.
 MAX_REPAIR_DEPTH_MM = None
-GELSIGHT_CAM   = 0
+# Exploratory 3D thresholds: P90 per class of dataset_defectos (Estudio_Global_Metricas_3D.xlsx).
+# NON-REPAIRABLE (3D) if ANY metric exceeds its threshold. Not validated against real repairs.
+REPAIR_3D_THRESHOLDS = {
+    0: {'area_mm2': 45.93, 'depth_p95_mm': 0.0706, 'depth_volume_mm3': 1.2139},
+    1: {'major_axis_length_mm': 5.7288, 'depth_p95_mm': 0.0694, 'depth_volume_mm3': 0.1212},
+    2: {'area_mm2': 47.9318, 'depth_p95_mm': 0.0848, 'depth_volume_mm3': 2.0236},
+    3: {'area_mm2': 11.2003, 'depth_p95_mm': 0.1777, 'depth_volume_mm3': 1.297},
+}
+REPAIR_MODEL_PATH = os.path.join(SAVE_DIR, 'repairability.joblib')
+CAMERA_DEVICE  = os.environ.get('CAMERA_DEVICE', '/dev/video0')
+GELSIGHT_CAM   = (
+    int(CAMERA_DEVICE.removeprefix('/dev/video'))
+    if CAMERA_DEVICE.startswith('/dev/video')
+    else int(CAMERA_DEVICE)
+)
 STREAM_FPS     = 30
-INFER_INTERVAL = 1  # Será modificable dinámicamente
+INFER_INTERVAL = 0.2  # Limit ROS/USB inference to 5 Hz by default.
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  GELSIGHT MINI SPECS (Calibration)
