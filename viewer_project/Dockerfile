@@ -39,7 +39,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY viewer_project/requirements.txt /tmp/requirements.txt
 
-ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cu121
 RUN python3 -m pip install --no-cache-dir \
     torch==2.5.1 torchvision==0.20.1 \
     --index-url ${TORCH_INDEX_URL} \

@@ -549,7 +549,7 @@ class ROS2Thread(QThread):
                 
                 try:
 
-                    frm = self._bridge.imgmsg_to_cv2(msg, 'bgr8')
+                    frm = self._bridge.imgmsg_to_cv2(msg, 'passthrough')
                     
                     with QMutexLocker(self._mx):
                         if self._nc is not None: self.conf = self._nc; self._nc = None
