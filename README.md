@@ -1,8 +1,4 @@
-Aquí tienes tu README completo, **con todo el contenido original conservado y una sección nueva añadida al final** sobre la instalación de Git LFS, la clonación del repositorio, la recuperación de los pesos y las comprobaciones realizadas.
 
-He mantenido las instrucciones originales y he documentado el procedimiento de recuperación sin dar por hecho que la descarga de los modelos haya terminado correctamente.
-
----
 
 # Tactile Defect Inspection System: Advanced Metrology & AI Analysis
 
