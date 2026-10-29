@@ -4,6 +4,8 @@ services:
       context: ..
       dockerfile: viewer_project/Dockerfile
       network: host
+      args:
+        TORCH_INDEX_URL: https://download.pytorch.org/whl/cu121
     image: tactile-defect-viewer:humble
     working_dir: /app
     command: ["python3", "main.py"]
@@ -18,13 +20,21 @@ services:
       CAMERA_DEVICE: ${CAMERA_DEVICE:-/dev/video0}
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      - ${XAUTHORITY:?Set XAUTHORITY to the active X11 authorization file}:/tmp/.Xauthority:ro
-      - /dev/bus/usb:/dev/bus/usb:rw
+      - ${XAUTHORITY:-~/.Xauthority}:/tmp/.Xauthority:ro
+      - /dev:/dev
       - ./models:/app/models:ro
       - ./data:/app/data:ro
       - ./exports:/app/exports:rw
-    devices:
-      - ${CAMERA_DEVICE:-/dev/video0}:${CAMERA_DEVICE:-/dev/video0}
+    device_cgroup_rules:
+      - 'c 81:* rmw'   # V4L2 video devices (/dev/video*)
+      - 'c 189:* rmw'  # USB devices
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     stdin_open: true
     tty: true
 
@@ -44,6 +54,13 @@ services:
       RMW_IMPLEMENTATION: rmw_fastrtps_cpp
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      - ${XAUTHORITY:?Set XAUTHORITY to the active X11 authorization file}:/tmp/.Xauthority:ro
+      - ${XAUTHORITY:-~/.Xauthority}:/tmp/.Xauthority:ro
       - ./rviz/gs_pointcloud.rviz:/rviz/gs_pointcloud.rviz:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     command: ["rviz2", "-d", "/rviz/gs_pointcloud.rviz"]
