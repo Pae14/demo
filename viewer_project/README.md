@@ -60,22 +60,35 @@ La evaluación de integridad estructural y viabilidad de reparación combina tre
 
 ### 1. Métricas Dimensionales y Morfológicas 2D
 
-Calculadas sobre la máscara binaria segmentada del defecto, proyectada a unidades métricas reales mediante el campo de visión del GelSight Mini ($18.67\,\text{mm} \times 14.00\,\text{mm}$ para $320 \times 240$ px, i.e., $A_{px} \approx 0.00341\,\text{mm}^2/\text{px}$):
+Calculadas sobre la máscara binaria segmentada del defecto, proyectada a unidades métricas reales mediante el campo de visión del GelSight Mini ($18.67\text{ mm} \times 14.00\text{ mm}$ para $320 \times 240$ px, i.e., $A_{px} \approx 0.00341\text{ mm}^2/\text{px}$):
 
-* **Área ($mm^2$)**:
-  $$\text{Área} = N_{\text{pixeles}} \times \left(\frac{\text{FOV}_W \times \text{FOV}_H}{W \times H}\right)$$
-  Cuantifica la extensión bidimensional del daño sobre la superficie.
-* **Perímetro ($mm$)**:
-  $$\text{Perímetro} = P_{\text{pixeles}} \times \sqrt{\frac{\text{FOV}_W \times \text{FOV}_H}{W \times H}}$$
-  Calculado a lo largo del contorno exterior continuo de la máscara (utilizando `skimage.measure.regionprops` o `cv2.findContours`).
-* **Excentricidad ($e$)**:
-  $$e = \sqrt{1 - \frac{b^2}{a^2}}$$
-  donde $a$ y $b$ son los semiejes mayor y menor de la elipse equivalente.
+* **Área ($mm^2$)**: Cuantifica la extensión bidimensional del daño sobre la superficie:
+
+```math
+\text{Área} = N_{\text{pixeles}} \times \left( \frac{\text{FOV}_W \times \text{FOV}_H}{W \times H} \right)
+```
+
+* **Perímetro ($mm$)**: Longitud a lo largo del contorno exterior continuo de la máscara:
+
+```math
+\text{Perímetro} = P_{\text{pixeles}} \times \sqrt{\frac{\text{FOV}_W \times \text{FOV}_H}{W \times H}}
+```
+
+* **Excentricidad ($e$)**: Relación de aspecto de la elipse equivalente ($a$: semieje mayor, $b$: semieje menor):
+
+```math
+e = \sqrt{1 - \frac{b^2}{a^2}}
+```
+
   * $e \to 0$: Defecto circular o isotrópico (típico de agujeros o picaduras por impacto).
   * $e \to 1$: Defecto lineal o alargado (típico de grietas longitudinales o fisuras por tracción).
-* **Compacidad / Circularidad ($C$)**:
-  $$C = \frac{4\pi \cdot \text{Área}}{\text{Perímetro}^2}$$
-  Mide la rugosidad del perímetro: círculos ideales tienen $C = 1$; contornos irregulares o ramificados presentan $C \ll 1$.
+
+* **Compacidad / Circularidad ($C$)**: Mide la regularidad del contorno respecto a un círculo perfecto ($C = 1$):
+
+```math
+C = \frac{4\pi \cdot \text{Área}}{\text{Perímetro}^2}
+```
+
 * **Extensión de Ejes por SVD (Longitud y Anchura en $mm$)**:
   Mediante descomposición en valores singulares (SVD) de las coordenadas $(x, y)$ centradas del defecto, se determina el vector director de mayor varianza:
   * **Longitud (`major_axis_length_mm`)**: Extensión máxima en el eje principal.
@@ -88,14 +101,28 @@ Calculadas sobre la máscara binaria segmentada del defecto, proyectada a unidad
 Extraídas sobre la matriz de coocurrencia de niveles de gris (GLCM) normalizada $P(i, j)$ calculada en la ROI del defecto en 4 direcciones espaciales ($\theta \in \{0^\circ, 45^\circ, 90^\circ, 135^\circ\}$ a distancia $d = 1$):
 
 * **Energía GLCM (Uniformidad / Angular Second Moment)**:
-  $$\text{Energía} = \sum_{i} \sum_{j} P(i, j)^2$$
+
+```math
+\text{Energía} = \sum_{i} \sum_{j} P(i, j)^2
+```
+
   * *Interpretación*: Mide la homogeneidad del patrón superficial. Valores altos indican textura lisa y suave (material sano). Valores bajos indican alta heterogeneidad (rugosidad severa, micro-desgarros por fricción o pérdida de recubrimiento).
+
 * **Entropía GLCM**:
-  $$\text{Entropía} = - \sum_{i} \sum_{j} P(i, j) \log_2(P(i, j) + \epsilon)$$
-  * *Interpretación*: Mide el grado de desorden e impredecibilidad espacial en la reflectancia. Superficies muy dañadas, con bordes fracturados o micro-roturas exhiben entropías elevadas ($> 8.5\text{--}9.2$).
+
+```math
+\text{Entropía} = - \sum_{i} \sum_{j} P(i, j) \log_2(P(i, j) + \epsilon)
+```
+
+  * *Interpretación*: Mide el grado de desorden e impredecibilidad espacial en la reflectancia. Superficies muy dañadas o fracturadas exhiben entropías elevadas ($> 8.5\text{--}9.2$).
+
 * **Homogeneidad GLCM (Inverse Difference Moment)**:
-  $$\text{Homogeneidad} = \sum_{i} \sum_{j} \frac{P(i, j)}{1 + |i - j|}$$
-  * *Interpretación*: Evalúa la cercanía de la distribución de elementos respecto a la diagonal principal de la GLCM.
+
+```math
+\text{Homogeneidad} = \sum_{i} \sum_{j} \frac{P(i, j)}{1 + |i - j|}
+```
+
+  * *Interpretación*: Evalúa la cercanía de la distribución respecto a la diagonal principal de la GLCM. Disminuye ante transiciones bruscas o bordes afilados.
 
 ---
 
@@ -105,9 +132,17 @@ Calculadas a partir de la nube de puntos 3D organizada $(X, Y, Z)$ en metros:
 
 * **Ajuste de Plano Local de Referencia**:
   Para aislar la curvatura intrínseca de la pieza del defecto en sí, se dilata la máscara con un kernel de $13 \times 13$ px y se resta la máscara original para formar un **anillo perimetral de piel sana circundante**:
-  $$\text{Anillo} = (\text{dilate}(\text{mask}) \setminus \text{mask}) \cap \text{puntos\_válidos}$$
+
+```math
+\text{Anillo} = (\text{dilate}(\text{mask}) \setminus \text{mask}) \cap \text{puntos\_válidos}
+```
+
   Se ajusta un plano $Z = c_0 X + c_1 Y + c_2$ sobre dicho anillo por mínimos cuadrados (`np.linalg.lstsq`). Para cada punto del defecto, la profundidad relativa local en milímetros es:
-  $$\text{depth}(x, y) = \max\left(Z_{\text{plano}}(x, y) - Z(x, y),\, 0\right) \times 1000.0$$
+
+```math
+\text{depth}(x, y) = \max\left(Z_{\text{plano}}(x, y) - Z(x, y),\, 0\right) \times 1000.0
+```
+
 * **Profundidad Percentil 95 (`depth_p95_mm`)**:
   Percentil 95 de la profundidad relativa. Se prefiere al máximo absoluto para ser robusto frente a ruido puntual de sensor o reflejos ópticos especulares de la membrana del GelSight.
 * **Profundidad Media (`depth_mean_mm`)**:
@@ -116,7 +151,11 @@ Calculadas a partir de la nube de puntos 3D organizada $(X, Y, Z)$ en metros:
   Profundidad puntual extrema alcanzada en la cavidad.
 * **Volumen del Defecto (`depth_volume_mm3`)**:
   Volumen total estimado de la cavidad o pérdida de material:
-  $$\text{Volumen} = \sum_{(x, y) \in \text{defecto}} \text{depth}(x, y) \times \Delta x \times \Delta y$$
+
+```math
+\text{Volumen} = \sum_{(x, y) \in \text{defecto}} \text{depth}(x, y) \times \Delta x \times \Delta y
+```
+
   donde $\Delta x$ y $\Delta y$ son los espaciamientos espaciales medios entre columnas y filas de la nube de puntos en milímetros.
 
 ---
@@ -138,14 +177,14 @@ El sistema evalúa el dictamen de reparación mediante reglas estadísticas de n
 
 | Clase de Defecto | Familia de Métrica | Parámetros Clave | Condición **NON-REPAIRABLE** | Justificación Técnica de Fallo |
 | :--- | :--- | :--- | :--- | :--- |
-| **Material Loss - Holes**<br>*(Pérdida de material)* | Geometría 2D | Área ($mm^2$)<br>Perímetro ($mm$) | $\text{Área} > 20.5\text{ mm}^2$ **O**<br>$\text{Perímetro} > 18.6\text{ mm}$ | Pérdida de sección resistente que excede la capacidad de relleno o aporte sin deformación residual. |
-| | Profundidad 3D (P90) | Área ($mm^2$)<br>P95 ($mm$)<br>Volumen ($mm^3$) | $\text{Área} > 11.20\text{ mm}^2$ **O**<br>$\text{P95} > 0.178\text{ mm}$ ($178\,\mu m$) **O**<br>$\text{Volumen} > 1.297\text{ mm}^3$ | Cavidad profunda que concentra tensiones triaxiales y promueve inicio de grietas bajo fatiga. |
-| **Crack**<br>*(Grietas y Fisuras)* | Geometría 2D y Textura | Área ($mm^2$)<br>Perímetro ($mm$)<br>Excentricidad ($e$)<br>Entropía GLCM | $\text{Área} > 6.67\text{ mm}^2$ **O**<br>$\text{Perímetro} > 14.13\text{ mm}$ **O**<br>$e < 0.98$ *(ramificada)* **O**<br>$\text{Entropía} > 9.28$ | Grietas muy largas, con frente de avance ramificado ($e < 0.98$) o bordes de rotura caóticos ($\text{Entropía} > 9.28$). |
-| | Profundidad 3D (P90) | Longitud ($mm$)<br>P95 ($mm$)<br>Volumen ($mm^3$) | $\text{Longitud} > 5.73\text{ mm}$ **O**<br>$\text{P95} > 0.069\text{ mm}$ ($69\,\mu m$) **O**<br>$\text{Volumen} > 0.121\text{ mm}^3$ | Fisura profunda que penetra capas estructurales internas no rectificables mediante pulido superficial. |
-| **Scratch - Abrasion**<br>*(Desgaste por Abrasión)* | Textura 2D | Energía GLCM<br>Entropía GLCM | $\text{Energía} < 0.12$ **O**<br>$\text{Entropía} > 8.46$ | Desgaste superficial agresivo con rotura completa del patrón de acabado base. |
-| | Profundidad 3D (P90) | Área ($mm^2$)<br>P95 ($mm$)<br>Volumen ($mm^3$) | $\text{Área} > 45.93\text{ mm}^2$ **O**<br>$\text{P95} > 0.071\text{ mm}$ ($71\,\mu m$) **O**<br>$\text{Volumen} > 1.214\text{ mm}^3$ | Zona erosionada profunda que requeriría un decapado mayor a la tolerancia geométrica admisible. |
-| **Scratch - Friction**<br>*(Fricción / Arrancamiento)* | Textura 2D | Energía GLCM<br>Entropía GLCM | $\text{Energía} < 0.06$ **O**<br>$\text{Entropía} > 8.75$ | Adherencia o microsoldadura en frío con deformación plástica severa de la capa exterior. |
-| | Profundidad 3D (P90) | Área ($mm^2$)<br>P95 ($mm$)<br>Volumen ($mm^3$) | $\text{Área} > 47.93\text{ mm}^2$ **O**<br>$\text{P95} > 0.085\text{ mm}$ ($85\,\mu m$) **O**<br>$\text{Volumen} > 2.024\text{ mm}^3$ | Surcos de frotamiento que exceden el umbral admisible de reacondicionamiento mecánico. |
+| **Material Loss - Holes**<br>*(Pérdida de material)* | Geometría 2D | Área ($mm^2$)<br>Perímetro ($mm$) | **Área** > 20.5 mm² **O**<br>**Perímetro** > 18.6 mm | Pérdida de sección resistente que excede la capacidad de relleno o aporte sin deformación residual. |
+| | Profundidad 3D (P90) | Área ($mm^2$)<br>P95 ($mm$)<br>Volumen ($mm^3$) | **Área** > 11.20 mm² **O**<br>**P95** > 0.178 mm (178 µm) **O**<br>**Volumen** > 1.297 mm³ | Cavidad profunda que concentra tensiones triaxiales y promueve inicio de grietas bajo fatiga. |
+| **Crack**<br>*(Grietas y Fisuras)* | Geometría 2D y Textura | Área ($mm^2$)<br>Perímetro ($mm$)<br>Excentricidad ($e$)<br>Entropía GLCM | **Área** > 6.67 mm² **O**<br>**Perímetro** > 14.13 mm **O**<br>**e** < 0.98 *(ramificada)* **O**<br>**Entropía** > 9.28 | Fisuras con extensión excesiva, ramificadas (baja excentricidad) o con bordes de rotura caóticos (alta entropía). |
+| | Profundidad 3D (P90) | Longitud ($mm$)<br>P95 ($mm$)<br>Volumen ($mm^3$) | **Longitud** > 5.73 mm **O**<br>**P95** > 0.069 mm (69 µm) **O**<br>**Volumen** > 0.121 mm³ | Fisura profunda que penetra capas estructurales internas no rectificables mediante pulido superficial. |
+| **Scratch - Abrasion**<br>*(Desgaste por Abrasión)* | Textura 2D | Energía GLCM<br>Entropía GLCM | **Energía** < 0.12 **O**<br>**Entropía** > 8.46 | Desgaste superficial agresivo con rotura completa del patrón de acabado base. |
+| | Profundidad 3D (P90) | Área ($mm^2$)<br>P95 ($mm$)<br>Volumen ($mm^3$) | **Área** > 45.93 mm² **O**<br>**P95** > 0.071 mm (71 µm) **O**<br>**Volumen** > 1.214 mm³ | Zona erosionada profunda que requeriría un decapado mayor a la tolerancia geométrica admisible. |
+| **Scratch - Friction**<br>*(Fricción / Arrancamiento)* | Textura 2D | Energía GLCM<br>Entropía GLCM | **Energía** < 0.06 **O**<br>**Entropía** > 8.75 | Adherencia o microsoldadura en frío con deformación plástica severa de la capa exterior. |
+| | Profundidad 3D (P90) | Área ($mm^2$)<br>P95 ($mm$)<br>Volumen ($mm^3$) | **Área** > 47.93 mm² **O**<br>**P95** > 0.085 mm (85 µm) **O**<br>**Volumen** > 2.024 mm³ | Surcos de frotamiento que exceden el umbral admisible de reacondicionamiento mecánico. |
 
 ---
 
