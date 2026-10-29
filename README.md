@@ -1,10 +1,8 @@
+# Tactile Defect Inspection System: Advanced Metrology & AI Analysis 
 
+Este proyecto presenta una solución integral de **inspección visual-táctil** diseñada para la detección, segmentación y clasificación de defectos superficiales en entornos industriales. Utilizando el sensor biomimético **GelSight Mini**, la aplicación captura la topografía de las superficies permitiendo un análisis de metrología dimensional y textural de alta precisión.
 
-# Tactile Defect Inspection System: Advanced Metrology & AI Analysis
-
-Este proyecto presenta una solución integral de **inspección visual-táctil** diseñada para la detección, segmentación y clasificación de defectos superficiales en entornos industriales. Utilizando el sensor biomimético **GelSight Mini**, la aplicación trasciende la visión convencional al capturar la topografía microscópica de las superficies, permitiendo un análisis de metrología dimensional y textural de alta precisión.
-
-La herramienta integra algoritmos de **Deep Learning** (YOLOv12, YOLOv26, RF-DETR) con técnicas de **Visión Artificial clásica** (GLCM de Haralick) y reglas basadas en estudios estadísticos para determinar de forma autónoma la integridad de los componentes inspeccionados.
+La herramienta integra algoritmos de **Deep Learning** (YOLOv12, YOLOv26, RF-DETR, ResNet18 y CNN) con técnicas de **Visión Artificial clásica** (GLCM de Haralick) y reglas de negocio basadas en estudios estadísticos para determinar de forma autónoma la integridad de los componentes inspeccionados.
 
 ---
 
@@ -12,13 +10,16 @@ La herramienta integra algoritmos de **Deep Learning** (YOLOv12, YOLOv26, RF-DET
 
 El software sigue un diseño modular y desacoplado para garantizar la mantenibilidad y el rendimiento en tiempo real:
 
-1. **`main.py`**: **Orquestador Central**. Gestiona el ciclo de vida de la aplicación, la navegación entre pestañas (Offline/Online) y la interfaz principal PyQt6.
-2. **`workers.py`**: **Capa de Concurrencia e Integración**. Implementa el procesamiento multihilo (`QThread`) y el nodo de **ROS 2** para la suscripción a sensores externos.
-3. **`utils_vision.py`**: **Motor Analítico**. Contiene los algoritmos de metrología, los descriptores de textura GLCM y la lógica de decisión de reparabilidad.
-4. **`ui_components.py`**: **Framework de UI**. Define la estética _Glassmorphism_, los widgets personalizados y el sistema de animaciones.
-5. **`config.py`**: **Fuente de Verdad**. Centraliza constantes de calibración (mm/px), rutas globales de modelos y parámetros de red.
-6. **`export_metrics.py`**: **Herramienta de Reporting**. Script para el procesamiento por lotes y generación de informes CSV estadísticos.
-
+| Archivo / Carpeta | Función |
+| --- | --- |
+| **`main.py`** | **Orquestador Central**. Ciclo de vida de la aplicación, navegación entre pestañas (Offline/Online) y lógica general de la GUI en PyQt6. |
+| **`workers.py`** | **Capa de Concurrencia e Integración**. Hilos de adquisición (`GSThread` para cámara local, `ROS2Thread` para topic ROS 2), cargadores asíncronos y ejecución de inferencia en GPU/CPU (`DEVICE`). |
+| **`utils_vision.py`** | **Motor Analítico**. Métricas dimensionales (área, perímetro, excentricidad), descriptores texturales GLCM y reglas heurísticas de reparabilidad. |
+| **`ui_components.py`** | **Framework de UI**. Estética *Glassmorphism*, paneles de visualización, botones animados y tarjetas de métricas. |
+| **`config.py`** | **Fuente de Verdad**. Rutas de modelos, calibración GelSight (mm/px), umbrales de confianza, cámara e intervalo de inferencia. |
+| **`export_metrics.py`** | **Herramienta de Reporting**. Script para procesamiento por lotes y generación de informes CSV estadísticos. |
+| **`models/`** | Directorio donde residen los pesos y checkpoints entrenados. |
+| **`exports/`** | Carpeta de salida para capturas de pantalla, reportes y métricas. |
 ---
 
 ## Concurrencia y Rendimiento (Multi-threading)
@@ -26,382 +27,277 @@ El software sigue un diseño modular y desacoplado para garantizar la mantenibil
 Para garantizar un rendimiento de grado industrial y una experiencia de usuario fluida, la aplicación implementa una arquitectura **multihilo asíncrona**:
 
 - **UI Thread**: Renderizado de GUI y animaciones sin bloqueos.
-- **Acquisition Thread (****`ROS2Thread`****)**: Nodo de ROS 2 dedicado a la escucha y conversión de imágenes mediante `cv_bridge`.
+- **Acquisition Thread (`ROS2Thread`)**: Nodo de ROS 2 dedicado a la escucha y conversión de imágenes mediante `cv_bridge`.
 - **Inference Thread**: Ejecución paralela de modelos de IA, permitiendo el análisis de un frame mientras se recibe el siguiente.
 - **Async Loaders**: Carga de modelos pesados en segundo plano durante el inicio de la app.
 
 ---
 
-## Integración con ROS 2 (Robot Operating System)
+## Modelos y Gestión de Pesos (`models/`)
 
-La aplicación actúa como un **nodo nativo de ROS 2**, ideal para entornos con brazos robóticos (MoveIt) y simuladores (Gazebo).
+La aplicación requiere los siguientes pesos preentrenados dentro de la carpeta `models/`:
 
-- **Suscripción Dinámica**: Configuración del topic en tiempo real desde la interfaz gráfica.
-- **Gestión de QoS (Best Effort)**: Optimizado para telemetría robótica y drones, garantizando compatibilidad y baja latencia.
-- **Robustez**: Soporte nativo para frecuencias de imagen bajas (hasta **1 Hz**) sin afectar la estabilidad de la UI.
+| Modelo / Tarea | Archivo en el Host | Tamaño aprox. | Descripción |
+| --- | --- | --- | --- |
+| **YOLO12n-seg** | `models/yolo12/best.pt` | ~5.8 MB | Segmentación de instancias ligera y de alta velocidad. |
+| **YOLO26n-seg** | `models/yolo26/best.pt` | ~6.3 MB | Segmentación de instancias de defectología táctil. |
+| **RF-DETR** | `models/checkpoint_best_ema.pt` | ~389 MB | Detector Transformer de alta precisión para defectos complejos. |
+| **ResNet18** | `models/checkpoint_epoch_49.pth.tar` | ~129 MB | Clasificador convolucional multiclase de defectos superficiales. |
+| **CNN Keras** | `models/best_model.weights.h5` | ~191 MB | Modelo convolucional alternativo entrenado en TensorFlow/Keras. |
 
----
+### Comprobación de integridad de los pesos (Git LFS)
 
-## Lógica de Reparabilidad (Umbrales Estadísticos)
+Si el proyecto ha sido clonado mediante Git, verifique que los archivos pesados sean archivos binarios reales y no punteros de texto generados por Git LFS:
 
-El sistema evalúa automáticamente si un defecto es **NON-REPAIRABLE** basándose en métricas dimensionales y texturales:
-
-- **Hole**: Área \> 20.5 mm² o Perímetro \> 18.6 mm.
-- **Crack**: Área \> 6.67 mm², Perímetro \> 14.13 mm, Excentricidad \< 0.98 o Entropía \> 9.28.
-- **Abrasion**: Energía \< 0.12 o Entropía \> 8.46.
-- **Friction**: Energía \< 0.06 o Entropía \> 8.75.
-
----
-
-## Despliegue con Docker
-
-La imagen está basada en ROS 2 Humble sobre Ubuntu 22.04 y Python 3.10. Instala PyTorch/cu121, TensorFlow, PyQt6, OpenCV, Ultralytics, RF-DETR, Open3D y las dependencias ROS (`cv_bridge`, `sensor_msgs`). PyTorch usa CPU si no se expone una GPU NVIDIA. Los pesos y datos se montan desde el host y no se copian en la imagen.
-
-### Preparar el host
-
-- Linux con Docker Engine y Docker Compose v2.
-- Para la GUI, una sesión gráfica X11 activa. El compose monta el socket X11 y la pantalla indicada por `DISPLAY`.
-- Para el sensor, acceso a `/dev/bus/usb`; la cámara local se pasa como dispositivo `/dev/video*`.
-- Para GPU NVIDIA, driver compatible y NVIDIA Container Toolkit instalado y configurado con Docker.
-
-Desde la raíz `demo/`:
-
+```bash
+# Comprobar si algún archivo contiene punteros LFS sin descargar:
+grep -rn "version https://git-lfs" models/
 ```
-cd viewer_project
-mkdir -p data/test2/images data/test2/labels exports
-xhost +si:localuser:root
+
+- Si el comando anterior **no devuelve nada**, los pesos están completos y listos para usarse.
+- Si devuelve coincidencias, ejecute:
+  ```bash
+  git lfs install
+  git lfs pull
+  ```
+- O verifique los tamaños con:
+  ```bash
+  ls -lh models/ models/yolo12/ models/yolo26/
+  ```
+
+---
+
+## Despliegue con Docker (Recomendado)
+
+El despliegue con Docker aísla todas las dependencias del sistema operativo, proveyendo **ROS 2 Humble**, compatibilidad con **GPU NVIDIA (CUDA 12.1)** y las librerías gráficas de PyQt6.
+
+### 1. Requisitos Previos en el Host
+
+- **Docker Engine** y **Docker Compose v2** instalados.
+- Para aceleración por hardware: **NVIDIA Driver** y **NVIDIA Container Toolkit** instalados.
+- Sesión gráfica **X11** activa para desplegar la ventana de la aplicación.
+- Habilitar permisos de visualización X11:
+  ```bash
+  xhost +si:localuser:root
+  ```
+
+### 2. Compilación de la Imagen
+
+Desde la raíz del proyecto (`/home/aurova/Desktop/paula/viewer_project`):
+
+```bash
 docker compose build
-docker compose up
 ```
 
-La interfaz y RViz2 se abren en el escritorio local. Sin sensor, RViz muestra la cuadrícula y deja el display `/gs_mini_pcd` esperando datos. Al terminar, revoca el permiso X11:
+### 3. Verificación de la GPU (NVIDIA CUDA)
 
-```
-xhost -si:localuser:root
-```
+Para comprobar que el contenedor detecta la tarjeta gráfica NVIDIA y la versión de PyTorch con CUDA 12.1:
 
-Si la cámara no es `/dev/video0`, indica el dispositivo antes de arrancar:
-
+```bash
+docker compose run --rm viewer python3 -c "import torch; print('CUDA disponible:', torch.cuda.is_available(), '| Dispositivo:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU')"
 ```
-CAMERA_DEVICE=/dev/video2 docker compose up
-```
+*(Deberá mostrar `CUDA disponible: True | Dispositivo: NVIDIA GeForce RTX 3060`)*
 
-Para habilitar CUDA, usa el override opcional (no lo uses en equipos sin NVIDIA):
+### 4. Arranque de la Interfaz Gráfica
 
-```
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+```bash
+xhost +si:localuser:root
+docker compose up --remove-orphans
 ```
 
-Comprueba la disponibilidad de GPU dentro del contenedor con:
+> **Nota sobre dispositivos de cámara**: Si utiliza una cámara local USB física que esté en un puerto diferente de `/dev/video0`, puede indicarlo al arrancar:
+> ```bash
+> CAMERA_DEVICE=/dev/video2 docker compose up --remove-orphans
+> ```
 
-```
-docker compose run --rm viewer python3 -c "import torch; print(torch.cuda.is_available())"
-```
+> **Nota para ordenadores sin tarjeta NVIDIA (Modo solo CPU)**:
+> Si se ejecuta en un equipo que no dispone de GPU NVIDIA, comenta las líneas `deploy:` en `docker-compose.yml` para que Docker no solicite el driver de NVIDIA. La aplicación e inferencia funcionarán en CPU de forma automática.
 
-### Pesos, datos y exportaciones
+---
 
-Coloca los archivos en estas rutas del host; `config.py` espera exactamente estas rutas:
+## Conexión mediante Topic de ROS 2
 
-| Uso | Ruta |
-| --- | --- |
-| Segmentación YOLO12 | `models/yolo12/best.pt` |
-| Segmentación YOLO26 | `models/yolo26/best.pt` |
-| RF-DETR | `models/checkpoint_best_ema.pt` |
-| Clasificación ResNet | `models/checkpoint_epoch_49.pth.tar` |
-| Clasificación CNN | `models/best_model.weights.h5` |
-| Imágenes offline | `data/test2/images/` |
-| Etiquetas Ground Truth YOLO | `data/test2/labels/` |
-| Capturas e informes | `exports/` |
+El contenedor incluye el paquete **`vb_tactile_sensors`** precompilado en `/ros2_ws` y está configurado con `network_mode: host`, lo que permite que el middleware DDS de ROS 2 comparta el mismo espacio de red que el host y otros contenedores.
 
-Los modelos se montan de solo lectura en `/app/models` y el dataset en `/app/data`; las salidas van a `exports/`. El `.dockerignore` excluye pesos, datos y artefactos de compilación del contexto de build.
+### 1. Iniciar el Publicador del Sensor (con Docker)
 
-### GUI y nodos ROS 2
+Desde una terminal en `/home/aurova/Desktop/paula/viewer_project`:
 
-El servicio predeterminado ejecuta la interfaz. Para publicar imagen y profundidad/nube del GelSight Mini, en otra terminal ejecuta:
-
-```
-cd viewer_project
+```bash
 docker compose run --rm viewer ros2 run vb_tactile_sensors gs_image_depth
 ```
 
-El nodo publica la imagen en `/gs_mini_img` y `PointCloud2` organizado por píxel en `/gs_mini_pcd`, ambos con el mismo timestamp y frame. En la pestaña Online selecciona `ROS 2 Topic` y usa `/gs_mini_img`. Los publicadores de imagen alternativos se ejecutan con `ros2 run vb_tactile_sensors gs_image` o `ros2 run vb_tactile_sensors digit_image`. `digit_image_depth` requiere el repositorio externo `digit-depth` y sus pesos, que no se incluyen en esta imagen.
+> **Nodos ejecutables disponibles en `vb_tactile_sensors`**:
+> - `gs_image_depth`: Publica imagen (`/gs_mini_img`), imagen de profundidad (`/gs_depth_image`) y nube 3D (`/gs_mini_pcd`) del GelSight Mini con aceleración GPU (CUDA).
+> - `gs_image`: Publica únicamente la imagen del GelSight Mini en `/gs_mini_img`.
+> - `digit_image`: Publica la imagen del sensor DIGIT en `/digit_img`.
+> - `digit_image_depth`: Publica imagen y mapa de profundidad para el sensor DIGIT.
 
-Cuando imagen y nube coinciden en timestamp, frame y resolución, la máscara segmentada se aplica a los puntos correspondientes. La interfaz calcula profundidad media, P95, máxima y volumen estimado respecto a un plano local ajustado con los píxeles vecinos. `MAX_REPAIR_DEPTH_MM` en `config.py` permite añadir el P95 a la regla de reparabilidad; permanece en `None` hasta calibrar un límite válido para el material y proceso de reparación.
+### 2. Iniciar el Visor (GUI en otra terminal)
 
-En modo Online, el selector `Output view` alterna entre la máscara de segmentación y una proyección coloreada de la altura Z del cloud sincronizado. RViz conserva la vista 3D interactiva en una ventana separada.
+En una segunda terminal, arranca la interfaz gráfica:
 
-RViz usa `rviz/gs_pointcloud.rviz`, con el frame `gelsightmini_camera_frame` y el display PointCloud2 conectado a `/gs_mini_pcd`. Para abrir únicamente RViz, ejecuta `docker compose up --build rviz`; no necesita que el sensor esté conectado para abrir la ventana.
-
-Para abrir una shell ROS en el mismo entorno:
-
-```
-docker compose run --rm viewer bash
-ros2 topic list
-```
-
-El contenedor usa `network_mode: host` para DDS. Mantén el mismo `ROS_DOMAIN_ID` que los demás nodos. Para usar otro dominio, por ejemplo:
-
-```
-ROS_DOMAIN_ID=7 docker compose up
+```bash
+cd /home/aurova/Desktop/paula/viewer_project
+xhost +si:localuser:root
+docker compose up --remove-orphans
 ```
 
-### Estado de integración
+### 3. Conectar la Interfaz al Topic
 
-- La inferencia seleccionable cubre YOLO12, YOLO26, RF-DETR y DINOv3. Las métricas de máscara incluyen área, perímetro, excentricidad, compacidad y GLCM; con ROS2 también se presentan métricas de profundidad y volumen calculadas sobre la zona segmentada.
-- El worker ROS2 recibe `sensor_msgs/Image` y `/gs_mini_pcd`; solo usa la nube si está sincronizada y alineada. RViz2 muestra la nube en una ventana separada.
-- DINOv3 usa el checkpoint `models/best.pt`, que incluye el backbone y la cabeza de segmentación.
-- La construcción de la imagen instala dependencias e incluye el paquete ROS, pero no puede probar la cámara, el acceso gráfico, CUDA ni la compatibilidad de pesos sin el hardware y los checkpoints correspondientes.
+1. En la aplicación, navega a la pestaña **Online**.
+2. En el menú desplegable **Source Selection**, selecciona **ROS 2 Topic**.
+3. El campo **Topic Name** vendrá por defecto con `/gs_mini_img` (puedes cambiarlo si usas `/digit_img` o cualquier otro topic).
+4. Pulsa **▶ Start**.
+5. El indicador pasará a **⬤ Streaming** (verde) al recibir los frames y procesará la inferencia en tiempo real en la GPU NVIDIA.
 
-> **Nota académica**: los umbrales de reparabilidad son heurísticos y requieren validación para cada tejido, calibración y protocolo de inspección.
+### 4. Diagnóstico de Topics
+
+Para inspeccionar o depurar los topics activos desde el entorno ROS 2:
+
+```bash
+# Listar los ejecutables del paquete sensor
+docker compose run --rm viewer ros2 pkg executables vb_tactile_sensors
+
+# Listar topics activos
+docker compose run --rm viewer ros2 topic list
+
+# Comprobar frecuencia de publicación (Hz)
+docker compose run --rm viewer ros2 topic hz /gs_mini_img
+```
 
 ---
 
-# Instalación del repositorio y recuperación de pesos mediante Git LFS
+## Ejecución Nativa en el Host (sin Docker)
 
-Esta sección documenta los pasos adicionales realizados para preparar el entorno, descargar el repositorio y diagnosticar los archivos de pesos de los modelos.
+Si dispone de un entorno Ubuntu con **ROS 2 Humble** y drivers de NVIDIA instalados directamente en el sistema:
 
-## 1\. Instalación de Git LFS
+1. **Crear y activar entorno virtual**:
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   ```
 
-Durante el diagnóstico se detectó que varios archivos de modelos contenían punteros de Git LFS en lugar de los pesos reales.
+2. **Instalar PyTorch con soporte CUDA**:
+   ```bash
+   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+   ```
 
-Para instalar Git LFS en Ubuntu:
+3. **Instalar dependencias del proyecto**:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-```
-sudo apt update
-sudo apt install git-lfs
-git lfs install
-```
+4. **Instalar dependencias de ROS 2 para Python**:
+   ```bash
+   sudo apt update
+   sudo apt install ros-humble-cv-bridge ros-humble-sensor-msgs ros-humble-std-msgs
+   ```
 
-Comprobar la instalación:
+5. **Compilar el paquete sensor en el host (opcional)**:
+   ```bash
+   colcon build --packages-select vb_tactile_sensors --symlink-install
+   source install/setup.bash
+   ```
 
-```
-git lfs version
-```
+6. **Iniciar la aplicación**:
+   ```bash
+   source /opt/ros/humble/setup.bash
+   python3 main.py
+   ```
 
-En el entorno utilizado se obtuvo:
+---
 
-```
-git-lfs/2.9.2 (GitHub; linux amd64; go 1.13.5)
-```
+## 🛠️ Métricas de Metrología y Lógica de Reparabilidad
 
-La actualización de los índices de paquetes de Ubuntu mostró advertencias relacionadas con las claves GPG de los repositorios Intel RealSense y ROS. Estas advertencias no estaban directamente relacionadas con el error de carga de RF-DETR.
+El sistema incorpora un motor analítico multidimensional que evalúa el defecto superficial combinando **geometría 2D**, **textura microscópica (GLCM de Haralick)** y **topografía de profundidad 3D** (reconstruida mediante sensor táctil fotométrico GelSight Mini). 
 
-## 2\. Descarga del repositorio
+A partir de estas métricas, el sistema clasifica de forma autónoma cada defecto como **REPAIRABLE** (reparable mediante rectificado, pulido o aporte) o **NON-REPAIRABLE** (daño estructural crítico o que supera las tolerancias admisibles).
 
-La copia original se descargó como ZIP desde GitHub. Por ello, la carpeta original no contenía un directorio `.git` y no permitía ejecutar directamente `git lfs pull`.
+---
 
-Se identificó la siguiente URL como posible origen del proyecto:
+### 1. Calibración del Sensor Táctil GelSight Mini
 
-```
-https://github.com/Pae14/demo.git
-```
+La conversión entre el espacio de imagen (píxeles) y las dimensiones métricas reales ($mm$) se basa en el campo de visión calibrado (*Field of View*) de la membrana elastomérica:
 
-Para mantener intacta la copia original, se intentó clonar el repositorio en un directorio independiente:
+- **Ancho del sensor ($W_{mm}$)**: $18.6\text{ mm}$
+- **Alto del sensor ($H_{mm}$)**: $14.3\text{ mm}$
+- **Área por píxel**: $A_{px} = \frac{18.6 \times 14.3}{\text{ancho}_{px} \times \text{alto}_{px}}\text{ mm}^2/\text{px}$
+- **Resolución espacial**: $\Delta l = \sqrt{A_{px}}\text{ mm/px}$
 
-```
-cd ~/Escritorio/remain_project
+---
 
-git clone https://github.com/Pae14/demo.git demo_lfs
-```
+### 2. Métricas Texturales (GLCM de Haralick)
 
-Si la clonación termina correctamente:
+Sobre la región de interés (ROI) en escala de grises correspondiente a la máscara binaria del defecto, se calcula la **Matriz de Co-ocurrencia de Niveles de Gris (GLCM)** para una distancia inter-píxel de $d=1$ promediando en 4 orientaciones espaciales ($\theta = \{0^\circ, 45^\circ, 90^\circ, 135^\circ\}$):
 
-```
-cd ~/Escritorio/remain_project/demo_lfs
+$$\text{GLCM}(i, j) = \sum_{x} \sum_{y} \begin{cases} 1 & \text{si } I(x, y) = i \text{ y } I(x+\Delta x, y+\Delta y) = j \\ 0 & \text{en otro caso} \end{cases}$$
 
-git lfs pull
-```
+A partir de la matriz normalizada de probabilidades $P(i, j)$, se extraen los siguientes descriptores texturales:
 
-Estos comandos deben ejecutarse únicamente si el repositorio es accesible y la clonación se ha completado correctamente.
+* **Energía GLCM (Uniformidad / Segundo Momento Angular - ASM)**:
+  $$\text{Energía} = \sum_{i} \sum_{j} P(i, j)^2$$
+  * *Interpretación física*: Mide la homogeneidad y regularidad de las micro-texturas. Superficies pulidas o no dañadas exhiben valores altos de energía. Cuando existen surcos de fricción severa o desgarros por abrasión, la dispersión de intensidades es caótica, provocando una **caída drástica** de la energía ($\le 0.04 - 0.12$).
+* **Entropía GLCM**:
+  $$\text{Entropía} = -\sum_{i} \sum_{j} P(i, j) \log_2(P(i, j) + \epsilon)$$
+  * *Interpretación física*: Mide la aleatoriedad, desorden y complejidad de la textura superficial. Un defecto con microrugosidades agudas, fracturas o desprendimiento granular produce un incremento notable de la entropía ($> 8.46 - 9.28$).
+* **Homogeneidad GLCM (Momento de Diferencia Inversa - IDM)**:
+  $$\text{Homogeneidad} = \sum_{i} \sum_{j} \frac{P(i, j)}{1 + (i - j)^2}$$
+  * *Interpretación física*: Evalúa la suavidad de las transiciones de nivel de gris locales. Disminuye significativamente en transiciones bruscas o bordes afilados dentro del defecto.
 
-**Estado:** queda pendiente confirmar que la URL sea accesible y que el repositorio contenga los pesos necesarios. Si GitHub devuelve un error 404 o de permisos, será necesario verificar la dirección o los permisos de acceso.
+---
 
-## 3\. Diagnóstico de los archivos de pesos
+### 3. Métricas Geométricas y Dimensionales (2D)
 
-Los archivos de modelos se encuentran en:
+Calculadas sobre las regiones conexas de la segmentación (`skimage.measure.regionprops`):
 
-```
-viewer_project/models/
-```
+* **Área ($mm^2$)**: Superficie total proyectada de la huella del defecto.
+* **Perímetro ($mm$)**: Longitud del contorno periférico exterior del defecto.
+* **Excentricidad ($e \in [0, 1]$)**:
+  $$e = \sqrt{1 - \left(\frac{b}{a}\right)^2}$$
+  Relación de aspecto elíptica ($a$: semieje mayor, $b$: semieje menor).
+  * $e \to 0$: Geometría circular o regular (típica de picaduras o pérdida de material puntual - *Holes*).
+  * $e \to 1$: Geometría marcadamente alargada o lineal (típica de grietas - *Cracks* con $e \ge 0.98$). Una grieta con excentricidad reducida ($e < 0.98$) indica **ramificación multidireccional crítica**.
+* **Compacidad**: $C = \frac{4\pi \cdot \text{Área}}{\text{Perímetro}^2} \in (0, 1]$.
+* **Longitud del Eje Mayor ($mm$) y Eje Menor ($mm$)**: Extensión longitudinal y transversal máxima de la elipse equivalente.
 
-Las rutas configuradas en `config.py` son:
+---
 
-| Modelo | Ruta |
-| --- | --- |
-| YOLO12 | `models/yolo12/best.pt` |
-| YOLO26 | `models/yolo26/best.pt` |
-| RF-DETR | `models/checkpoint_best_ema.pt` |
-| DINOv3 | `models/best.pt` |
-| ResNet | `models/checkpoint_epoch_49.pth.tar` |
-| CNN | `models/best_model.weights.h5` |
+### 4. Métricas Topográficas y de Profundidad 3D (PointCloud)
 
-Para comprobar los archivos:
+A partir de la nube de puntos organizada `sensor_msgs/PointCloud2` obtenida mediante la reconstrucción fotométrica 3D del sensor GelSight Mini:
 
-```
-cd ~/Escritorio/remain_project/demo-main\(1\)/demo-main/viewer_project
+1. **Ajuste del Plano de Referencia Local**:
+   Para aislar la curvatura de la pieza inspeccionada, se calcula un anillo dilatado de 13 píxeles alrededor de la máscara y se excluyen los puntos del defecto. Sobre los puntos sanos circundantes se ajusta un plano por mínimos cuadrados:
+   $$z_{\text{plano}}(x, y) = c_0 x + c_1 y + c_2$$
+2. **Cálculo de Altura Relativa y Profundidad ($mm$)**:
+   $$\text{Profundidad}(x, y) = \max\left(z_{\text{plano}}(x, y) - z(x, y),\, 0\right) \times 1000\text{ mm}$$
+
+Descriptores 3D extraídos por defecto:
+
+* **Profundidad Media (`depth_mean_mm`)**: Promedio de penetración de la hendidura o cavidad.
+* **Profundidad Percentil 95 (`depth_p95_mm`)**: Profundidad en el percentil 95 de los puntos del defecto. Es el descriptor más robusto y fiable frente a ruidos o picos espurios del sensor para evaluar la penetración máxima real.
+* **Profundidad Máxima (`depth_max_mm`)**: Profundidad máxima puntual alcanzada en la cavidad.
+* **Volumen del Defecto (`depth_volume_mm3`)**: Volumen total estimado de pérdida de material o deformación ($mm^3$):
+  $$\text{Volumen} = \sum_{(x,y) \in \text{defecto}} \text{Profundidad}(x, y) \times A_{px}$$
+
+---
+
+### 5. Criterios y Umbrales de Reparabilidad por Defecto
+
+Un defecto se dictamina como **NON-REPAIRABLE** si se superan los límites de tolerancia dimensional, textural o volumétrica establecidos a partir de los estudios estadísticos del dataset de defectología industrial:
+
+| Clase de Defecto | Tipo de Métrica | Parámetro Evaluado | Condición de No Reparabilidad (**NON-REPAIRABLE**) | Justificación Técnica |
+| :--- | :--- | :--- | :--- | :--- |
+| **Material Loss - Holes**<br>*(Pérdida de material / Agujeros)* | Geometría 2D | Área ($mm^2$)<br>Perímetro ($mm$) | $\text{Área} > 20.5\text{ mm}^2$ **O** $\text{Perímetro} > 18.6\text{ mm}$ | Supera el límite de material mecanizable o relleno por aporte de soldadura sin comprometer la resistencia estructural. |
+| | Profundidad 3D *(P90)* | Área ($mm^2$)<br>Profundidad P95 ($mm$)<br>Volumen ($mm^3$) | $\text{Área} > 11.20\text{ mm}^2$ **O**<br>$\text{P95} > 0.178\text{ mm}$ ($178\,\mu m$) **O**<br>$\text{Volumen} > 1.297\text{ mm}^3$ | Cavidades profundas que inducen concentración de tensiones severa y riesgo de colapso por fatiga. |
+| **Crack**<br>*(Grietas / Fisuras)* | Geometría 2D y Textura | Área ($mm^2$)<br>Perímetro ($mm$)<br>Excentricidad ($e$)<br>Entropía GLCM | $\text{Área} > 6.67\text{ mm}^2$ **O**<br>$\text{Perímetro} > 14.13\text{ mm}$ **O**<br>$e < 0.98$ *(ramificación)* **O**<br>$\text{Entropía} > 9.28$ | Fisuras con extensión excesiva, ramificadas (baja excentricidad) o con bordes desestructurados (alta entropía). |
+| | Profundidad 3D *(P90)* | Longitud ($mm$)<br>Profundidad P95 ($mm$)<br>Volumen ($mm^3$) | $\text{Longitud} > 5.73\text{ mm}$ **O**<br>$\text{P95} > 0.069\text{ mm}$ ($69\,\mu m$) **O**<br>$\text{Volumen} > 0.121\text{ mm}^3$ | Grietas profundas que penetran la capa de tratamiento superficial e impiden el reacondicionamiento por rectificado. |
+| **Scratch - Abrasion**<br>*(Rayaduras por Abrasión)* | Textura 2D | Energía GLCM<br>Entropía GLCM | $\text{Energía} < 0.12$ **O**<br>$\text{Entropía} > 8.46$ | Desgaste superficial severo con pérdida total de uniformidad microscópica en el área de contacto. |
+| | Profundidad 3D *(P90)* | Área ($mm^2$)<br>Profundidad P95 ($mm$)<br>Volumen ($mm^3$) | $\text{Área} > 45.93\text{ mm}^2$ **O**<br>$\text{P95} > 0.071\text{ mm}$ ($71\,\mu m$) **O**<br>$\text{Volumen} > 1.214\text{ mm}^3$ | Abrasión extendida que requiere un desbaste más profundo que la tolerancia dimensional de la pieza. |
+| **Scratch - Friction**<br>*(Rayaduras por Fricción)* | Textura 2D | Energía GLCM<br>Entropía GLCM | $\text{Energía} < 0.06$ **O**<br>$\text{Entropía} > 8.75$ | Desgarro por microsoldadura en frío o frotamiento con desorden textural irreversible. |
+| | Profundidad 3D *(P90)* | Área ($mm^2$)<br>Profundidad P95 ($mm$)<br>Volumen ($mm^3$) | $\text{Área} > 47.93\text{ mm}^2$ **O**<br>$\text{P95} > 0.085\text{ mm}$ ($85\,\mu m$) **O**<br>$\text{Volumen} > 2.024\text{ mm}^3$ | Surcos profundos de fricción que superan el espesor admisible de pulido. |
+
+> **Visualización en la Interfaz**:
+> Todos estos descriptores se calculan dinámicamente en tiempo real para cada defecto detectado por las redes neuronales y se muestran desglosados en el panel lateral de **Detections** y en el reporte generado mediante `export_metrics.py`. Si alguna métrica sobrepasa los umbrales de no reparabilidad, el estado visual del visor cambia automáticamente a **NON-REPAIRABLE** (rojo) junto con la notificación del parámetro infractor.
 
-ls -lh models/
-ls -lh models/yolo12/
-ls -lh models/yolo26/
-```
-
-Para identificar los archivos que todavía contienen punteros de Git LFS:
-
-```
-grep -RIl \
-  --exclude-dir=.git \
-  "git-lfs.github.com/spec/v1" \
-  models/
-```
-
-Durante el diagnóstico se encontraron cuatro archivos de aproximadamente 134 bytes:
-
-```
-best_model.weights.h5
-best.pt
-checkpoint_best_ema.pt
-checkpoint_epoch_49.pth.tar
-```
-
-Al inspeccionar su contenido, se encontró el encabezado:
-
-```
-version https://git-lfs.github.com/spec/v1
-oid sha256:871802e1f1d133572035662018df93390e84b3f7dacfb649504c0fc0f9c88fb8
-size 345231921
-```
-
-Este contenido es un puntero de Git LFS, no los pesos binarios del modelo. El tamaño declarado para ese archivo es de 345.231.921 bytes.
-
-Para comprobar un archivo concreto:
-
-```
-head -n 4 models/checkpoint_best_ema.pt
-```
-
-Si aparece el encabezado de Git LFS, el archivo real todavía no se ha recuperado.
-
-## 4\. Recuperación de los pesos
-
-Una vez confirmado que el repositorio original es accesible, descargar los objetos LFS mediante:
-
-```
-cd ~/Escritorio/remain_project/demo_lfs
-
-git lfs pull
-```
-
-Después, verificar que los archivos ya no contienen punteros:
-
-```
-grep -RIl \
-  --exclude-dir=.git \
-  "git-lfs.github.com/spec/v1" \
-  viewer_project/models/
-```
-
-Si el comando no devuelve resultados, no se han encontrado punteros con ese contenido en los archivos inspeccionados.
-
-Comprobar el tamaño de los modelos:
-
-```
-ls -lh viewer_project/models/
-ls -lh viewer_project/models/yolo12/
-ls -lh viewer_project/models/yolo26/
-```
-
-No se deben intercambiar los archivos entre modelos ni descargar checkpoints aleatorios. Cada archivo debe corresponder al modelo y a la tarea para la que fue entrenado.
-
-Si el repositorio no contiene los pesos o no es accesible, será necesario recuperar cada archivo desde su fuente original.
-
-## 5\. Reconstrucción y arranque de Docker
-
-Después de recuperar los pesos, volver al directorio del proyecto:
-
-```
-cd ~/Escritorio/remain_project/demo_lfs/viewer_project
-```
-
-Construir la imagen:
-
-```
-docker compose build
-```
-
-Iniciar la aplicación:
-
-```
-docker compose up
-```
-
-Para comprobar el estado de los servicios:
-
-```
-docker compose ps
-```
-
-Consultar los registros del visor:
-
-```
-docker compose logs --tail=100 viewer
-```
-
-Si se necesita entrar en un contenedor en ejecución:
-
-```
-docker ps
-docker exec -it ID_O_NOMBRE_DEL_CONTENEDOR bash
-```
-
-Sustituir `ID_O_NOMBRE_DEL_CONTENEDOR` por el identificador o nombre que aparezca en `docker ps`.
-
-Para salir:
-
-```
-exit
-```
-
-Los comandos `docker compose` deben ejecutarse normalmente desde el host Ubuntu, dentro del directorio que contiene `docker-compose.yml`.
-
-## 6\. Ejecución del nodo ROS 2 del GelSight Mini
-
-Para iniciar el publicador de imagen y profundidad desde el host Ubuntu:
-
-```
-cd ~/Escritorio/remain_project/demo_lfs/viewer_project
-
-docker compose run --rm viewer \
-  ros2 run vb_tactile_sensors gs_image_depth
-```
-
-En otra terminal, comprobar los topics:
-
-```
-cd ~/Escritorio/remain_project/demo_lfs/viewer_project
-
-docker compose run --rm viewer ros2 topic list
-```
-
-Los topics esperados son:
-
-```
-/gs_mini_img
-/gs_mini_pcd
-```
-
-`/gs_mini_img` corresponde a la imagen del sensor y `/gs_mini_pcd` a la nube de puntos 3D.
-
-Su disponibilidad depende de que el nodo se haya iniciado correctamente y de que el sensor esté accesible.
-
-## 7\. Estado final de la instalación
-
-El diagnóstico ha permitido confirmar que:
-
-- Git LFS está instalado en Ubuntu.
-- La copia original descargada como ZIP no contiene un repositorio Git en su directorio raíz.
-- Varios archivos de pesos contienen punteros de Git LFS en lugar de los modelos reales.
-- El error `invalid load key, 'v'` de RF-DETR es compatible con el intento de cargar uno de esos punteros como checkpoint.
-- Se ha identificado una posible URL del repositorio original, pero todavía debe verificarse su accesibilidad.
-- Se han documentado los comandos para clonar el repositorio, descargar los objetos LFS, comprobar los pesos y ejecutar Docker y ROS 2.
-
-La instalación no debe considerarse completada hasta confirmar que los pesos reales se han recuperado, que los modelos se cargan correctamente y que la aplicación arranca sin errores de inicialización.

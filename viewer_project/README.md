@@ -1,196 +1,223 @@
-# Tactile Defect Inspection System: Advanced Metrology & AI Analysis 
+# Tactile Defect Inspection System: Advanced Metrology & AI Analysis (3D + 2D)
 
-Este proyecto presenta una solución integral de **inspección visual-táctil** diseñada para la detección, segmentación y clasificación de defectos superficiales en entornos industriales. Utilizando el sensor biomimético **GelSight Mini**, la aplicación trasciende la visión convencional al capturar la topografía microscópica de las superficies, permitiendo un análisis de metrología dimensional y textural de alta precisión.
+Este proyecto presenta una solución integral de **inspección visual-táctil 3D y 2D** diseñada para la detección, segmentación, metrología de profundidad y clasificación del estado de reparabilidad de defectos superficiales en entornos industriales. Utilizando el sensor biomimético **GelSight Mini**, la aplicación trasciende la visión convencional al capturar tanto la textura microscópica como la topografía 3D (nube de puntos) de las superficies.
 
-La herramienta integra segmentación con **YOLO12, YOLO26, RF-DETR y DINOv3**, metrología sobre la profundidad del GelSight, descriptores PFH/SHOT y clasificación supervisada de reparabilidad. Las reglas geométricas y texturales existentes se mantienen como análisis heurístico independiente.
+La herramienta integra algoritmos de **Deep Learning** (YOLOv12, YOLOv26, RF-DETR, ResNet18 y CNN) con técnicas de **Visión Artificial clásica** (GLCM de Haralick), **Metrología 3D** (estimación de profundidad respecto a plano local ajustado, volumen de pérdida de material) y **Descriptores PCL 3D avanzados** (PFH y SHOT) para determinar con precisión matemática si un componente dañado puede ser reparado (*REPAIRABLE*) o debe desecharse (*NON-REPAIRABLE*).
 
 ---
 
 ## Arquitectura del Sistema (File Structure)
 
-Los scripts están agrupados por función. Los archivos de ejecución de la interfaz permanecen en la raíz de `viewer_project` para conservar los comandos existentes de Docker; las herramientas auxiliares no se ejecutan al iniciar la aplicación.
+El software sigue un diseño modular y desacoplado para garantizar la mantenibilidad y el rendimiento en tiempo real en `/home/aurova/Desktop/paula/demo_lfs/viewer_project`:
 
-| Grupo | Archivos | Función |
-| --- | --- | --- |
-| Aplicación | `main.py`, `workers.py`, `ui_components.py`, `config.py` | Interfaz PyQt6, flujos de inferencia/ROS 2, componentes visuales y configuración. |
-| Visión | `utils_vision.py` | Métricas de máscara, textura GLCM y reglas heurísticas existentes. |
-| Nube y clasificación | `pointcloud_export.py`, `repairability.py` | Exportación PCD/PFH/SHOT, vista de normales, preparación de características y predicción supervisada. |
-| Herramientas manuales | `train_repairability.py`, `export_metrics.py` | Entrenamiento del clasificador y generación offline de informes CSV, respectivamente. Se ejecutan solo cuando se solicitan. |
-| Exportador PCL nativo | `pcl_descriptor_export/main.cpp` | Calcula PFH/SHOT por punto; se compila dentro de la imagen Docker. |
-| Pruebas | `tests/` | Pruebas de sincronización ROS/nube, exportación PCL y características del clasificador. |
-
-No se han eliminado los publicadores ni utilidades opcionales del paquete ROS `vb_tactile_sensors`: sus nodos están registrados en `setup.py`, aunque no todos sean parte del flujo principal del visor GelSight.
+| Archivo / Carpeta | Función |
+| :--- | :--- |
+| **`main.py`** | **Orquestador Central**. Ciclo de vida de la aplicación, navegación entre pestañas (Offline / Online ROS 2) y GUI en PyQt6 con soporte 3D y RViz. |
+| **`workers.py`** | **Capa de Concurrencia e Integración**. Hilos de adquisición (`GSThread` para cámara local, `ROS2Thread` para topic de imagen `/gs_mini_img` y nube `/gs_mini_pcd`), sincronización temporal de nubes e inferencia IA en GPU/CPU (`DEVICE`). |
+| **`utils_vision.py`** | **Motor Analítico 2D y 3D**. Métricas dimensionales, descriptores texturales GLCM, ajuste de planos por mínimos cuadrados sobre anillo perimetral, cálculo de profundidad P95, media, máxima y volumen. |
+| **`pointcloud_export.py`** | **Gestor de Nubes 3D y Descriptores**. Exportación sincronizada de PCD, cálculo de normales de superficie, extracción de descriptores PFH (125 bins) y SHOT (352 bins) e integración de predicción de reparabilidad. |
+| **`repairability.py`** | **Pipeline de Clasificación Supervisada**. Extracción y preparación de vectores de características (geometría, descriptores 3D o combinación de ambos) e inferencia con modelos entrenados (`repairability.joblib`). |
+| **`train_repairability.py`** | **Herramienta de Entrenamiento**. Creación de plantillas CSV (`exports/labels.csv`), entrenamiento y validación cruzada agrupada por pieza (`GroupKFold`) evaluando F1-score y matrices de confusión. |
+| **`segment_metrics.py`** | **Procesamiento de Métricas por Lotes**. Segmentación automática de datasets completos, extracción de métricas 2D + 3D por máscara y exportación a CSV. |
+| **`build_excel_3d.py`** | **Consolidación de Datos**. Agrupación de métricas 3D, descriptores y datos de inspección en tablas estructuradas para análisis estadístico. |
+| **`rgb_to_depth.py`** | **Reconstrucción de Profundidad Offline**. Conversión de pares de imágenes a mapas de profundidad y nubes de puntos `.npy`. |
+| **`pcl_descriptor_export/`** | **Módulo C++ Nativo PCL**. Exportador de descriptores PFH/SHOT acelerado por la biblioteca PCL compilado dentro del contenedor Docker. |
+| **`ui_components.py`** | **Framework de UI**. Estética *Glassmorphism*, paneles de visualización, controles de inferencia, botones animados y tarjetas de métricas. |
+| **`config.py`** | **Fuente de Verdad**. Rutas de modelos, calibración GelSight (mm/px), umbrales de confianza, tópicos ROS y límites de reparabilidad 3D. |
+| **`models/`** | Checkpoints entrenados de YOLO12, YOLO26, RF-DETR, ResNet18 y CNN. |
+| **`exports/`** | Salida de informes CSV, nubes PCD exportadas, descriptores PFH/SHOT y modelos `repairability.joblib`. |
 
 ---
 
 ## Concurrencia y Rendimiento (Multi-threading)
 
-Para garantizar un rendimiento de grado industrial y una experiencia de usuario fluida, la aplicación implementa una arquitectura **multihilo asíncrona**:
+Para garantizar un rendimiento industrial de alta tasa de refresco sin latencia ni bloqueos de interfaz:
 
-- **UI Thread**: Renderizado de GUI y animaciones sin bloqueos.
-- **Acquisition Thread (`ROS2Thread`)**: Nodo de ROS 2 dedicado a la escucha y conversión de imágenes mediante `cv_bridge`.
-- **Inference Thread**: Ejecución paralela de modelos de IA, permitiendo el análisis de un frame mientras se recibe el siguiente.
-- **Async Loaders**: Carga de modelos pesados en segundo plano durante el inicio de la app.
+* **UI Thread (PyQt6)**: Gestión del renderizado gráfico, visualización interactiva y eventos a 60 FPS.
+* **Acquisition Thread (`ROS2Thread`)**: Subscripción no bloqueante con QoS `BEST_EFFORT` a `/gs_mini_img` y `/gs_mini_pcd`. Implementa una cola de sincronización temporal exacta: empareja cada imagen con la nube de puntos que comparte el mismo timestamp de captura.
+* **Inference Thread (`InferenceWorker`)**: Inferencia asíncrona desacoplada de la visualización. El regulador *Inference Interval* permite modular la carga de la GPU para mantener fluidez total.
+* **Point Cloud Processing Worker**: Ajuste de plano local y cálculo de volumen ejecutados con operaciones vectorizadas en NumPy y SciPy.
 
 ---
 
 ## Integración con ROS 2 (Robot Operating System)
 
-La aplicación actúa como un **nodo nativo de ROS 2**, ideal para entornos con brazos robóticos (MoveIt) y simuladores (Gazebo).
+La aplicación actúa como un nodo ROS 2 nativo bajo **ROS 2 Humble**:
 
-- **Suscripción Dinámica**: Configuración del topic en tiempo real desde la interfaz gráfica.
-- **Gestión de QoS (Best Effort)**: Optimizado para telemetría robótica y drones, garantizando compatibilidad y baja latencia.
-- **Robustez**: Soporte nativo para frecuencias de imagen bajas (hasta **1 Hz**) sin afectar la estabilidad de la UI.
-
----
-
-## Lógica de Reparabilidad (Umbrales Estadísticos)
-
-El sistema evalúa automáticamente si un defecto es **NON-REPAIRABLE** basándose en métricas dimensionales y texturales:
-
-- **Hole**: Área > 20.5 mm² y Perímetro > 18.6 mm.
-- **Crack**: Área > 6.67 mm², Perímetro > 14.13 mm, Excentricidad < 0.98 o Entropía > 9.28.
-- **Abrasion**: Energía < 0.12 o Entropía > 8.46.
-- **Friction**: Energía < 0.06 o Entropía > 8.75.
-
-Estas reglas son heurísticas de la vista online y no sustituyen las etiquetas de resultado real usadas para entrenar y evaluar el clasificador supervisado.
-
-La tarjeta de métricas de la interfaz también destaca indicadores específicos por defecto: área, P95/máxima profundidad y volumen para agujeros, longitud/anchura/área/P95 para grietas, y área/profundidad/volumen para abrasión y fricción. La longitud y anchura de una grieta son extensiones geométricas estimadas desde su máscara. Estos valores 3D son descriptivos: no se aplican como umbral de reparabilidad hasta validarlos con muestras etiquetadas por resultado de reparación.
+* **`/gs_mini_img` (`sensor_msgs/msg/Image`)**: Flujo de imagen RGB táctil a 320×240 (decodificado mediante `cv_bridge`).
+* **`/gs_mini_pcd` (`sensor_msgs/msg/PointCloud2`)**: Nube de puntos 3D organizada pixel a pixel (altura Z en metros).
+* **Control de Vista (`Output View`)**: Alterna en tiempo real entre:
+  1. *Segmentación*: Máscara superpuesta sobre el frame óptico.
+  2. *Color Depth*: Mapa de elevación pseudocolor TURBO escalado dinámicamente según percentiles 2% y 98% de la coordenada Z.
+  3. *Combined*: Fusión alfa de la segmentación del defecto sobre el mapa de elevación 3D.
+* **Soporte RViz2**: Configuración incluida en `rviz/gs_pointcloud.rviz` en el frame `gelsightmini_camera_frame`.
 
 ---
 
-## Despliegue con Docker
+## Desglose Exhaustivo de Métricas de Reparabilidad (2D + 3D)
 
-La imagen está basada en ROS 2 Humble sobre Ubuntu 22.04 y Python 3.10. Instala PyTorch/cu121, TensorFlow, PyQt6, OpenCV, Ultralytics, RF-DETR, Open3D, la biblioteca nativa PCL y las dependencias ROS (`cv_bridge`, `sensor_msgs`). PyTorch usa CPU si no se expone una GPU NVIDIA. Los pesos y datos se montan desde el host y no se copian en la imagen.
+La evaluación de integridad estructural y viabilidad de reparación combina tres familias de descriptores matemáticos complementarios:
 
-### Preparar el host
+### 1. Métricas Dimensionales y Morfológicas 2D
 
-- Linux con Docker Engine y Docker Compose v2.
-- Para la GUI, una sesión gráfica X11 activa. Compose monta el socket y el archivo de autorización `XAUTHORITY` en solo lectura.
-- Para el sensor, acceso a `/dev/bus/usb`; la cámara local se pasa como dispositivo `/dev/video*`.
-- Para GPU NVIDIA, driver compatible y NVIDIA Container Toolkit instalado y configurado con Docker.
+Calculadas sobre la máscara binaria segmentada del defecto, proyectada a unidades métricas reales mediante el campo de visión del GelSight Mini ($18.67\,\text{mm} \times 14.00\,\text{mm}$ para $320 \times 240$ px, i.e., $A_{px} \approx 0.00341\,\text{mm}^2/\text{px}$):
 
-Desde la raíz `demo/`:
+* **Área ($mm^2$)**:
+  $$\text{Área} = N_{\text{pixeles}} \times \left(\frac{\text{FOV}_W \times \text{FOV}_H}{W \times H}\right)$$
+  Cuantifica la extensión bidimensional del daño sobre la superficie.
+* **Perímetro ($mm$)**:
+  $$\text{Perímetro} = P_{\text{pixeles}} \times \sqrt{\frac{\text{FOV}_W \times \text{FOV}_H}{W \times H}}$$
+  Calculado a lo largo del contorno exterior continuo de la máscara (utilizando `skimage.measure.regionprops` o `cv2.findContours`).
+* **Excentricidad ($e$)**:
+  $$e = \sqrt{1 - \frac{b^2}{a^2}}$$
+  donde $a$ y $b$ son los semiejes mayor y menor de la elipse equivalente.
+  * $e \to 0$: Defecto circular o isotrópico (típico de agujeros o picaduras por impacto).
+  * $e \to 1$: Defecto lineal o alargado (típico de grietas longitudinales o fisuras por tracción).
+* **Compacidad / Circularidad ($C$)**:
+  $$C = \frac{4\pi \cdot \text{Área}}{\text{Perímetro}^2}$$
+  Mide la rugosidad del perímetro: círculos ideales tienen $C = 1$; contornos irregulares o ramificados presentan $C \ll 1$.
+* **Extensión de Ejes por SVD (Longitud y Anchura en $mm$)**:
+  Mediante descomposición en valores singulares (SVD) de las coordenadas $(x, y)$ centradas del defecto, se determina el vector director de mayor varianza:
+  * **Longitud (`major_axis_length_mm`)**: Extensión máxima en el eje principal.
+  * **Anchura (`minor_axis_length_mm`)**: Extensión transversal máxima.
 
-```bash
-cd viewer_project
-mkdir -p data/test2/images data/test2/labels exports
-export XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"
-docker compose build
-docker compose up
-```
+---
 
-`docker compose up` abre únicamente la interfaz. RViz2 es opcional y se inicia aparte cuando se solicita.
+### 2. Métricas Texturales de Haralick (GLCM)
 
-El contenedor usa la cookie X11 del usuario, montada en solo lectura; no es necesario ejecutar `xhost`.
+Extraídas sobre la matriz de coocurrencia de niveles de gris (GLCM) normalizada $P(i, j)$ calculada en la ROI del defecto en 4 direcciones espaciales ($\theta \in \{0^\circ, 45^\circ, 90^\circ, 135^\circ\}$ a distancia $d = 1$):
 
-Si la cámara no es `/dev/video0`, indica el dispositivo antes de arrancar:
+* **Energía GLCM (Uniformidad / Angular Second Moment)**:
+  $$\text{Energía} = \sum_{i} \sum_{j} P(i, j)^2$$
+  * *Interpretación*: Mide la homogeneidad del patrón superficial. Valores altos indican textura lisa y suave (material sano). Valores bajos indican alta heterogeneidad (rugosidad severa, micro-desgarros por fricción o pérdida de recubrimiento).
+* **Entropía GLCM**:
+  $$\text{Entropía} = - \sum_{i} \sum_{j} P(i, j) \log_2(P(i, j) + \epsilon)$$
+  * *Interpretación*: Mide el grado de desorden e impredecibilidad espacial en la reflectancia. Superficies muy dañadas, con bordes fracturados o micro-roturas exhiben entropías elevadas ($> 8.5\text{--}9.2$).
+* **Homogeneidad GLCM (Inverse Difference Moment)**:
+  $$\text{Homogeneidad} = \sum_{i} \sum_{j} \frac{P(i, j)}{1 + |i - j|}$$
+  * *Interpretación*: Evalúa la cercanía de la distribución de elementos respecto a la diagonal principal de la GLCM.
 
-```bash
-CAMERA_DEVICE=/dev/video2 docker compose up
-```
+---
 
-Para habilitar CUDA, usa el override opcional (no lo uses en equipos sin NVIDIA):
+### 3. Métricas Topográficas 3D y de Profundidad GelSight
 
-```bash
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
-```
+Calculadas a partir de la nube de puntos 3D organizada $(X, Y, Z)$ en metros:
 
-Comprueba la disponibilidad de GPU dentro del contenedor con:
+* **Ajuste de Plano Local de Referencia**:
+  Para aislar la curvatura intrínseca de la pieza del defecto en sí, se dilata la máscara con un kernel de $13 \times 13$ px y se resta la máscara original para formar un **anillo perimetral de piel sana circundante**:
+  $$\text{Anillo} = (\text{dilate}(\text{mask}) \setminus \text{mask}) \cap \text{puntos\_válidos}$$
+  Se ajusta un plano $Z = c_0 X + c_1 Y + c_2$ sobre dicho anillo por mínimos cuadrados (`np.linalg.lstsq`). Para cada punto del defecto, la profundidad relativa local en milímetros es:
+  $$\text{depth}(x, y) = \max\left(Z_{\text{plano}}(x, y) - Z(x, y),\, 0\right) \times 1000.0$$
+* **Profundidad Percentil 95 (`depth_p95_mm`)**:
+  Percentil 95 de la profundidad relativa. Se prefiere al máximo absoluto para ser robusto frente a ruido puntual de sensor o reflejos ópticos especulares de la membrana del GelSight.
+* **Profundidad Media (`depth_mean_mm`)**:
+  Promedio de profundidad sobre toda la huella del defecto.
+* **Profundidad Máxima (`depth_max_mm`)**:
+  Profundidad puntual extrema alcanzada en la cavidad.
+* **Volumen del Defecto (`depth_volume_mm3`)**:
+  Volumen total estimado de la cavidad o pérdida de material:
+  $$\text{Volumen} = \sum_{(x, y) \in \text{defecto}} \text{depth}(x, y) \times \Delta x \times \Delta y$$
+  donde $\Delta x$ y $\Delta y$ son los espaciamientos espaciales medios entre columnas y filas de la nube de puntos en milímetros.
 
-```bash
-docker compose run --rm viewer python3 -c "import torch; print(torch.cuda.is_available())"
-```
+---
 
-### Pesos, datos y exportaciones
+### 4. Descriptores 3D Locales de Superficie (PFH y SHOT)
 
-Coloca los archivos en estas rutas del host; `config.py` espera exactamente estas rutas:
+Para capturar la geometría diferencial microscópica en nubes PCD exportadas (mediante el exportador nativo PCL o Open3D):
 
-| Uso | Ruta |
-| --- | --- |
-| Segmentación YOLO12 | `models/yolo12/best.pt` |
-| Segmentación YOLO26 | `models/yolo26/best.pt` |
-| RF-DETR | `models/checkpoint_best_ema.pt` |
-| Clasificación ResNet | `models/checkpoint_epoch_49.pth.tar` |
-| Clasificación CNN | `models/best_model.weights.h5` |
-| Imágenes offline | `data/test2/images/` |
-| Etiquetas Ground Truth YOLO | `data/test2/labels/` |
-| Capturas e informes | `exports/` |
+* **PFH (Point Feature Histograms - 125 bins)**:
+  Para cada punto con al menos 12 vecinos dentro de un radio de búsqueda $r = 3 \times \text{espaciamiento mediano}$, se analizan todos los pares de normales de superficie $(\mathbf{n}_s, \mathbf{n}_t)$ calculando los cuatro ángulos característicos de Darboux $(\alpha, \phi, \theta, d)$. El histograma resultante de 125 bins describe con precisión invariante a traslación/rotación la curvatura y concavidad local.
+* **SHOT (Signature of Histograms of OrienTations - 352 bins)**:
+  Crea una cuadrícula esférica local 3D (32 divisiones espaciales: 8 azimutales, 2 de elevación y 2 radiales) y calcula histogramas de coseno del ángulo entre normales (11 bins por división $\to 32 \times 11 = 352$ bins). Permite discriminar defectos planos de fracturas agudas o arrancamiento de fibras.
 
-Los modelos se montan de solo lectura en `/app/models` y el dataset en `/app/data`; las salidas van a `exports/`. El `.dockerignore` excluye pesos, datos y artefactos de compilación del contexto de build.
+---
 
-### GUI y nodos ROS 2
+### 5. Matriz de Decisión y Umbrales de Reparabilidad
 
-El servicio predeterminado ejecuta la interfaz. Para publicar imagen y profundidad/nube del GelSight Mini, en otra terminal ejecuta:
+El sistema evalúa el dictamen de reparación mediante reglas estadísticas de negocio validadas empíricamente:
 
-```bash
-cd viewer_project
-docker compose run --rm viewer ros2 run vb_tactile_sensors gs_image_depth
-```
+| Clase de Defecto | Familia de Métrica | Parámetros Clave | Condición **NON-REPAIRABLE** | Justificación Técnica de Fallo |
+| :--- | :--- | :--- | :--- | :--- |
+| **Material Loss - Holes**<br>*(Pérdida de material)* | Geometría 2D | Área ($mm^2$)<br>Perímetro ($mm$) | $\text{Área} > 20.5\text{ mm}^2$ **O**<br>$\text{Perímetro} > 18.6\text{ mm}$ | Pérdida de sección resistente que excede la capacidad de relleno o aporte sin deformación residual. |
+| | Profundidad 3D (P90) | Área ($mm^2$)<br>P95 ($mm$)<br>Volumen ($mm^3$) | $\text{Área} > 11.20\text{ mm}^2$ **O**<br>$\text{P95} > 0.178\text{ mm}$ ($178\,\mu m$) **O**<br>$\text{Volumen} > 1.297\text{ mm}^3$ | Cavidad profunda que concentra tensiones triaxiales y promueve inicio de grietas bajo fatiga. |
+| **Crack**<br>*(Grietas y Fisuras)* | Geometría 2D y Textura | Área ($mm^2$)<br>Perímetro ($mm$)<br>Excentricidad ($e$)<br>Entropía GLCM | $\text{Área} > 6.67\text{ mm}^2$ **O**<br>$\text{Perímetro} > 14.13\text{ mm}$ **O**<br>$e < 0.98$ *(ramificada)* **O**<br>$\text{Entropía} > 9.28$ | Grietas muy largas, con frente de avance ramificado ($e < 0.98$) o bordes de rotura caóticos ($\text{Entropía} > 9.28$). |
+| | Profundidad 3D (P90) | Longitud ($mm$)<br>P95 ($mm$)<br>Volumen ($mm^3$) | $\text{Longitud} > 5.73\text{ mm}$ **O**<br>$\text{P95} > 0.069\text{ mm}$ ($69\,\mu m$) **O**<br>$\text{Volumen} > 0.121\text{ mm}^3$ | Fisura profunda que penetra capas estructurales internas no rectificables mediante pulido superficial. |
+| **Scratch - Abrasion**<br>*(Desgaste por Abrasión)* | Textura 2D | Energía GLCM<br>Entropía GLCM | $\text{Energía} < 0.12$ **O**<br>$\text{Entropía} > 8.46$ | Desgaste superficial agresivo con rotura completa del patrón de acabado base. |
+| | Profundidad 3D (P90) | Área ($mm^2$)<br>P95 ($mm$)<br>Volumen ($mm^3$) | $\text{Área} > 45.93\text{ mm}^2$ **O**<br>$\text{P95} > 0.071\text{ mm}$ ($71\,\mu m$) **O**<br>$\text{Volumen} > 1.214\text{ mm}^3$ | Zona erosionada profunda que requeriría un decapado mayor a la tolerancia geométrica admisible. |
+| **Scratch - Friction**<br>*(Fricción / Arrancamiento)* | Textura 2D | Energía GLCM<br>Entropía GLCM | $\text{Energía} < 0.06$ **O**<br>$\text{Entropía} > 8.75$ | Adherencia o microsoldadura en frío con deformación plástica severa de la capa exterior. |
+| | Profundidad 3D (P90) | Área ($mm^2$)<br>P95 ($mm$)<br>Volumen ($mm^3$) | $\text{Área} > 47.93\text{ mm}^2$ **O**<br>$\text{P95} > 0.085\text{ mm}$ ($85\,\mu m$) **O**<br>$\text{Volumen} > 2.024\text{ mm}^3$ | Surcos de frotamiento que exceden el umbral admisible de reacondicionamiento mecánico. |
 
-La captura del GelSight usa FFmpeg para decodificar MJPEG y reducir el frame a 320×240 antes de entregarlo a ROS; si FFmpeg no está instalado, usa OpenCV como alternativa. Un hilo de captura continuo lee la cámara y el nodo publica cada frame nuevo en `/gs_mini_img`, sin bloquear el timer de ROS esperando a la cámara. Un segundo worker limita la reconstrucción de profundidad a 5 Hz y publica el `PointCloud2` organizado por píxel en `/gs_mini_pcd` con el timestamp y frame de la imagen procesada. En esta máquina el driver anuncia 25 FPS y la prueba directa de FFmpeg obtuvo aproximadamente 19 FPS; la frecuencia final depende del sensor y carga de CPU. En la pestaña Online selecciona `ROS 2 Topic` y usa `/gs_mini_img`. Los publicadores de imagen alternativos se ejecutan con `ros2 run vb_tactile_sensors gs_image` o `ros2 run vb_tactile_sensors digit_image`. `digit_image_depth` requiere el repositorio externo `digit-depth` y sus pesos, que no se incluyen en esta imagen.
+---
 
-La máscara segmentada solo se superpone y se exporta con la nube cuyo timestamp sea exactamente igual al de la imagen y cuyo frame y resolución sean compatibles. La interfaz mantiene en caché mensajes recientes para emparejar aunque la nube llegue después de la imagen; si no existe pareja exacta, muestra la segmentación sin profundidad y no reutiliza una nube atrasada. La imagen RGB se muestra a la frecuencia recibida; el control `Inference interval` limita la frecuencia de segmentación para no saturar la CPU/GPU, y las parejas imagen/nube sincronizadas más recientes tienen prioridad. La interfaz calcula profundidad media, P95, máxima y volumen estimado respecto a un plano local ajustado con los píxeles vecinos. `MAX_REPAIR_DEPTH_MM` en `config.py` permite añadir el P95 a la regla de reparabilidad; permanece en `None` hasta calibrar un límite válido para el material y proceso de reparación.
+## Clasificación Supervisada de Reparabilidad con Machine Learning
 
-En modo Online, el selector `Output view` alterna entre la máscara de segmentación, la proyección coloreada de la altura Z y la combinación de profundidad con la máscara segmentada. RViz conserva la vista 3D interactiva en una ventana separada.
+Además de las reglas heurísticas, el sistema incorpora un pipeline de clasificación supervisada basado en Random Forest / Gradient Boosting:
 
-El botón `Export PCD + PFH/SHOT` guarda una captura manual del siguiente frame con imagen y nube sincronizadas. Para cada región segmentada con al menos 12 puntos 3D válidos escribe un archivo PCD, un CSV con 125 valores PFH y 352 valores SHOT por punto, un manifiesto JSON y `depth_segmentation_overlay.png`. Los archivos se guardan en `exports/pointclouds/<captura>/`; el manifiesto indica las regiones omitidas si no tienen suficientes puntos. El radio de vecindad se estima como tres veces el espaciamiento mediano entre píxeles vecinos. La interfaz muestra la ruta de la exportación en la barra de estado.
-
-#### Entrenar la clasificación de reparabilidad
-
-El clasificador supervisado estima si una instancia es reparable (`1`) o no reparable (`0`) a partir de las características geométricas, PFH y SHOT. No genera una etiqueta fiable automáticamente: primero hay que etiquetar ejemplos usando el resultado real de la reparación o un criterio de inspección acordado. No uses como etiquetas las predicciones de las reglas geométricas si el objetivo es comprobar si PFH/SHOT mejoran esas reglas.
-
-1. Captura y exporta ejemplos representativos reparables y no reparables. Para una primera prueba se puede empezar con una sola clase de defecto, pero se necesitan las dos etiquetas de reparabilidad.
-2. Crea o actualiza la plantilla CSV:
-
+1. **Exportación de Ejemplares**:
+   En la interfaz gráfica, al pulsar **`Export PCD + PFH/SHOT`**, se genera en `exports/pointclouds/<captura>/`:
+   * Archivo `.pcd` con la nube 3D del defecto.
+   * Archivo `.csv` con los 125 valores PFH y 352 valores SHOT por punto.
+   * `manifest.json` y `depth_segmentation_overlay.png`.
+2. **Generación de Plantilla de Etiquetas**:
    ```bash
    docker compose run --rm viewer python3 train_repairability.py --init-labels
    ```
-
-   Esto crea `exports/labels.csv`, con una fila por instancia exportada. Las columnas son `capture`, `file_stem`, `class_name`, `piece` y `repairable`. Al volver a generar la plantilla se conservan las etiquetas existentes que coincidan en `capture` y `file_stem`.
-3. Edita `exports/labels.csv`: escribe `1` o `0` en `repairable`. Usa el mismo valor de `piece` para todas las capturas de una misma pieza física; eso permite agruparlas al evaluar el modelo y reduce la fuga entre entrenamiento y validación. Las filas sin etiqueta y las instancias de clases que aún no quieras usar pueden dejarse sin etiquetar.
-4. Entrena y compara los conjuntos de características:
-
-   ```bash
-   docker compose run --rm viewer python3 train_repairability.py
-   ```
-
-   El script compara `geometry`, `descriptors` y `both` con validación cruzada agrupada por `piece`, e imprime la matriz de confusión y métricas, incluido el F1 de la clase no reparable. Requiere al menos 10 instancias etiquetadas, ambas etiquetas y al menos dos grupos `piece`. Para elegir manualmente el conjunto usado al guardar:
-
+   Crea `exports/labels.csv` con columnas `capture`, `file_stem`, `class_name`, `piece` y `repairable` ($1$ o $0$).
+3. **Entrenamiento y Validación Cruzada**:
    ```bash
    docker compose run --rm viewer python3 train_repairability.py --use both
    ```
+   Compara tres conjuntos de características (`geometry`, `descriptors` y `both`) utilizando validación cruzada por grupos (`GroupKFold` sobre `piece`), evitando el sobreajuste entre inspecciones de una misma pieza.
+4. **Inferencia en Tiempo Real**:
+   El modelo entrenado se guarda en `exports/repairability.joblib`. Al detectarse un defecto, la interfaz muestra automáticamente en la barra de estado:
+   `ML: Holes: REPAIRABLE (82%)` o `ML: Crack: NON-REPAIRABLE (91%)`.
 
-   El modelo queda en `exports/repairability.joblib`. Las métricas con conjuntos pequeños son inestables y no demuestran que una variante sea mejor; valida con más piezas que no se usaron para entrenar.
-5. Reconstruye la imagen después de cambios de código y reinicia la interfaz:
+---
 
-   ```bash
-   docker compose build viewer
-   docker compose up viewer
-   ```
+## Despliegue con Docker y GPU
 
-   En la interfaz, pulsa `Export PCD + PFH/SHOT`. Si encuentra el modelo entrenado, la barra de estado añade la predicción y la probabilidad, por ejemplo `ML: Holes: REPAIRABLE (71%)`. La misma predicción se añade a cada instancia del `manifest.json` como `repairable` y `repairable_probability`. La clasificación se calcula al exportar, no en cada frame; sin `exports/repairability.joblib`, el PCD y los descriptores se exportan como siempre, pero no se añade predicción.
+La imagen está construida sobre **Ubuntu 22.04 + ROS 2 Humble** con aceleración CUDA para GPUs NVIDIA:
 
-RViz usa `rviz/gs_pointcloud.rviz`, con el frame `gelsightmini_camera_frame` y el display PointCloud2 conectado a `/gs_mini_pcd`. Para abrir RViz aparte, ejecuta `docker compose up --build rviz`; no necesita que el sensor esté conectado para abrir la ventana.
-
-Para abrir una shell ROS en el mismo entorno:
-
+### 1. Construir la Imagen
 ```bash
-docker compose run --rm viewer bash
-ros2 topic list
+cd /home/aurova/Desktop/paula/demo_lfs/viewer_project
+docker compose build
 ```
 
-El contenedor usa `network_mode: host` para DDS. Mantén el mismo `ROS_DOMAIN_ID` que los demás nodos. Para usar otro dominio, por ejemplo:
-
+### 2. Ejecutar la Interfaz Gráfica
+Permitir acceso al servidor X11 y arrancar el contenedor:
 ```bash
-ROS_DOMAIN_ID=7 docker compose up
+xhost +local:root
+docker compose up viewer
 ```
 
-### Estado de integración
+### 3. Publicar el Sensor GelSight Mini en ROS 2 (3D + 2D)
+En otra terminal, arrancar el nodo de adquisición y cálculo de profundidad:
+```bash
+cd /home/aurova/Desktop/paula/demo_lfs/viewer_project
+docker compose run --rm viewer ros2 run vb_tactile_sensors gs_image_depth
+```
 
-- La inferencia seleccionable cubre YOLO12, YOLO26, RF-DETR y DINOv3. Las métricas de máscara incluyen área, perímetro, excentricidad, compacidad y GLCM; con ROS2 también se presentan métricas de profundidad y volumen calculadas sobre la zona segmentada.
-- El worker ROS2 recibe `sensor_msgs/Image` y `/gs_mini_pcd`; solo usa la nube si está sincronizada y alineada. RViz2 muestra la nube en una ventana separada.
-- DINOv3 usa el checkpoint `models/best.pt`, que incluye el backbone y la cabeza de segmentación.
-- La construcción de la imagen instala dependencias e incluye el paquete ROS, pero no puede probar la cámara, el acceso gráfico, CUDA ni la compatibilidad de pesos sin el hardware y los checkpoints correspondientes.
+* El nodo publicará la imagen en `/gs_mini_img` y la nube de puntos 3D en `/gs_mini_pcd`.
+* En la interfaz, ve a la pestaña **Online**, selecciona **ROS 2 Topic** y suscríbete a `/gs_mini_img`.
 
-> **Nota académica**: los umbrales de reparabilidad son heurísticos y requieren validación para cada tejido, calibración y protocolo de inspección.
+### 4. Visualización en RViz2 (Opcional)
+Para inspeccionar la nube de puntos 3D de forma interactiva en RViz2:
+```bash
+docker compose up --build rviz
+```
+
+---
+
+## Verificación de Hardware y Diagnóstico
+
+Para verificar que PyTorch detecta la GPU dentro del contenedor:
+```bash
+docker compose run --rm viewer python3 -c "import torch; print('CUDA disponible:', torch.cuda.is_available(), '| GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU')"
+```
+
+Salida esperada con GPU NVIDIA:
+```text
+CUDA disponible: True | GPU: NVIDIA GeForce RTX 3060
+```
+*(Si no hay GPU NVIDIA, el sistema conmuta automáticamente a CPU sin fallos).*
