@@ -83,7 +83,7 @@ El despliegue con Docker aísla todas las dependencias del sistema operativo, pr
 
 ### 2. Compilación de la Imagen
 
-Desde la raíz del proyecto (`/home/aurova/Desktop/paula/viewer_project`):
+Desde la raíz del proyecto (`/.../viewer_project`):
 
 ```bash
 docker compose build
@@ -110,6 +110,15 @@ docker compose up --remove-orphans
 > CAMERA_DEVICE=/dev/video2 docker compose up --remove-orphans
 > ```
 
+En ocasiones, si tenemos más de una cámara es necesario revisar que dispositivo se ha asignado al sensor, ya que se asigna como fuera de la cámara. Para ello debes revisar desde fuera de la docker lo siguiente: 
+```bash
+v4l2-ctl --list-devices 
+```
+Si necestas isntalarlo solo tienes que ejecutar lo siguiente: 
+```bash
+apt-get update && apt-get isntall -y v4l-utils 
+```
+
 > **Nota para ordenadores sin tarjeta NVIDIA (Modo solo CPU)**:
 > Si se ejecuta en un equipo que no dispone de GPU NVIDIA, comenta las líneas `deploy:` en `docker-compose.yml` para que Docker no solicite el driver de NVIDIA. La aplicación e inferencia funcionarán en CPU de forma automática.
 
@@ -121,7 +130,7 @@ El contenedor incluye el paquete **`vb_tactile_sensors`** precompilado en `/ros2
 
 ### 1. Iniciar el Publicador del Sensor (con Docker)
 
-Desde una terminal en `/home/aurova/Desktop/paula/viewer_project`:
+Desde una terminal en `/.../viewer_project`:
 
 ```bash
 docker compose run --rm viewer ros2 run vb_tactile_sensors gs_image_depth
@@ -138,7 +147,7 @@ docker compose run --rm viewer ros2 run vb_tactile_sensors gs_image_depth
 En una segunda terminal, arranca la interfaz gráfica:
 
 ```bash
-cd /home/aurova/Desktop/paula/viewer_project
+cd /.../viewer_project
 xhost +si:localuser:root
 docker compose up --remove-orphans
 ```
@@ -208,7 +217,7 @@ Si dispone de un entorno Ubuntu con **ROS 2 Humble** y drivers de NVIDIA instala
 
 ---
 
-## 🛠️ Métricas de Metrología y Lógica de Reparabilidad
+## Métricas de Metrología y Lógica de Reparabilidad
 
 El sistema incorpora un motor analítico multidimensional que evalúa el defecto superficial combinando **geometría 2D**, **textura microscópica (GLCM de Haralick)** y **topografía de profundidad 3D** (reconstruida mediante sensor táctil fotométrico GelSight Mini). 
 
