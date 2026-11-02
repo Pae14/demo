@@ -22,6 +22,7 @@ services:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ${XAUTHORITY:-~/.Xauthority}:/tmp/.Xauthority:ro
       - /dev:/dev
+      - .:/app
       - ./models:/app/models:ro
       - ./data:/app/data:ro
       - ./exports:/app/exports:rw
