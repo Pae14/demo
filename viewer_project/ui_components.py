@@ -66,9 +66,10 @@ class PillBadge(QLabel):
         else: self.setStyleSheet(f"background:{P['bg2']}; color:{P['muted']}; border:1px solid {P['border']}; border-radius:11px; padding:1px 10px; font-size:11px; font-weight:500; font-family:'Inter','Segoe UI',sans-serif;")
 
 class TopMetricsBar(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, show_3d=True, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(350)
+        self.show_3d = show_3d
+        self.setFixedHeight(350 if show_3d else 260)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self._lay = QVBoxLayout(self)
         self._lay.setContentsMargins(0, 0, 0, 0)
@@ -193,11 +194,13 @@ class TopMetricsBar(QWidget):
             self._depth_items[key] = value
         depth_layout.addLayout(depth_grid)
 
-        
         self._lay.addWidget(self.class_card)
         self._lay.addWidget(self.shape_card)
         self._lay.addWidget(self.texture_card)
-        self._lay.addWidget(self.depth_card)
+        if self.show_3d:
+            self._lay.addWidget(self.depth_card)
+        else:
+            self.depth_card.hide()
         self.reset()
     
     def reset(self):
@@ -216,7 +219,8 @@ class TopMetricsBar(QWidget):
         self.class_card.show()
         self.shape_card.show()
         self.texture_card.show()
-        self.depth_card.show()
+        if self.show_3d:
+            self.depth_card.show()
         
         self.class_name.setText(str(m.get("class_name", "UNKNOWN")))
         self.class_conf.setText(str(m.get("conf", "0%")))
@@ -232,8 +236,9 @@ class TopMetricsBar(QWidget):
         self._texture_items["glcm_homogeneity"].setText(str(m.get("glcm_homogeneity", "0")))
         self._texture_items["glcm_energy"].setText(str(m.get("glcm_energy", "0")))
         self._texture_items["glcm_entropy"].setText(str(m.get("glcm_entropy", "0")))
-        for key, value in self._depth_items.items():
-            value.setText(str(m.get(key, "—")))
+        if self.show_3d:
+            for key, value in self._depth_items.items():
+                value.setText(str(m.get(key, "—")))
 
 
 class StatusBadge(QLabel):
@@ -248,8 +253,9 @@ class StatusBadge(QLabel):
 
 
 class ImgPanel(QWidget):
-    def __init__(self, title, accent=None, parent=None):
+    def __init__(self, title, accent=None, show_3d=True, parent=None):
         super().__init__(parent)
+        self.show_3d = show_3d
         self._pix = None; self._pending_arr = None; self._pending_txt = ""; self._pending_col = None; self._pending_metrics = None
         self._acc = accent or P["accent"]
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -262,17 +268,25 @@ class ImgPanel(QWidget):
         self._tlbl = _lbl(title, 11, 600, P["text2"])
         self._status_badge = StatusBadge()
         self._status_badge_3d = StatusBadge()
-        hr.addWidget(dot); hr.addWidget(self._tlbl); hr.addStretch(); hr.addWidget(self._status_badge); hr.addWidget(self._status_badge_3d); cl.addLayout(hr)
+        hr.addWidget(dot); hr.addWidget(self._tlbl); hr.addStretch(); hr.addWidget(self._status_badge)
+        if self.show_3d:
+            hr.addWidget(self._status_badge_3d)
+        else:
+            self._status_badge_3d.hide()
+        cl.addLayout(hr)
         ln = QFrame(); ln.setFixedHeight(2); ln.setStyleSheet(f"background:qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 {self._acc},stop:0.55 rgba(220,100,80,0.25),stop:1 transparent); border:none;border-radius:1px;"); cl.addWidget(ln)
-        self._metrics_bar = TopMetricsBar(); cl.addWidget(self._metrics_bar)
+        self._metrics_bar = TopMetricsBar(show_3d=self.show_3d); cl.addWidget(self._metrics_bar)
         self._il = QLabel(); self._il.setAlignment(Qt.AlignmentFlag.AlignCenter); self._il.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding); self._il.setMinimumHeight(200); cl.addWidget(self._il, 1)
-        outer.addWidget(self._card, 1); self.setMinimumWidth(300); self.setMinimumHeight(500); self._ph()
+        outer.addWidget(self._card, 1); self.setMinimumWidth(300); self.setMinimumHeight(450 if not show_3d else 500); self._ph()
 
     @staticmethod
     def _tag(text, prefix):
         return text if text == "NO DEFECTS" else f"{prefix}: {text}"
 
     def _set_3d(self, metrics):
+        if not self.show_3d:
+            self._status_badge_3d.hide()
+            return
         status = metrics.get('status_3d') if metrics else None
         if status:
             self._status_badge_3d.set_status(self._tag(status[0], '3D'), status[1])

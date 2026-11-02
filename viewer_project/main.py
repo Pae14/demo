@@ -161,22 +161,23 @@ class OfflineTab(QWidget):
         dl = QVBoxLayout(self._det_w); dl.setContentsMargins(18, 14, 18, 14); dl.setSpacing(12)
 
         sel_card = GlassCard(14)
-        sel_lay = QVBoxLayout(sel_card); sel_lay.setContentsMargins(14, 12, 14, 12); sel_lay.setSpacing(10)
-        self.seg_label = _lbl("Model 1 / 4 · YOLO12n-seg", 11, 700, P["accent"])
-        self.seg_slider = SmoothSlider(0, 3, 0)
-        self.seg_slider.valueChanged.connect(self._on_seg_slider)
-        sel_lay.addWidget(self.seg_label)
-        sel_lay.addWidget(self.seg_slider)
+        sel_lay = QHBoxLayout(sel_card); sel_lay.setContentsMargins(14, 10, 14, 10); sel_lay.setSpacing(12)
+        sel_lay.addWidget(_lbl("Model", 10, 700, P["muted"]))
+        self.seg_cb = _combo()
+        for k, v in SEGMENTATION_TITLES.items():
+            self.seg_cb.addItem(v, k)
+        self.seg_cb.currentIndexChanged.connect(self._on_seg_cb)
+        sel_lay.addWidget(self.seg_cb, 1)
         dl.addWidget(sel_card)
 
         row = QHBoxLayout(); row.setSpacing(12)
-        self.input_panel = ImgPanel("Tactile Input", accent=P["muted"])
+        self.input_panel = ImgPanel("Tactile Input", accent=P["muted"], show_3d=False)
         self.input_panel.setMinimumWidth(260)
         row.addWidget(self.input_panel, 1)
 
         self.output_panels = []
         for i, title in enumerate(SEGMENTATION_TITLES.values()):
-            pp = ImgPanel(f"Output: {title}", accent=PANEL_ACCENTS[i])
+            pp = ImgPanel(f"Output: {title}", accent=PANEL_ACCENTS[i], show_3d=False)
             pp.setVisible(i == 0)
             self.output_panels.append(pp)
             row.addWidget(pp, 1)
@@ -197,7 +198,7 @@ class OfflineTab(QWidget):
         self._gt_bar_lay.addWidget(self._gt_pills_w, 1); cls_outer.addWidget(self._gt_bar)
 
         cl = QHBoxLayout(); cl.setSpacing(16)
-        self._cls_orig = ImgPanel("Tactile Input", accent=P["muted"]); cl.addWidget(self._cls_orig, 1)
+        self._cls_orig = ImgPanel("Tactile Input", accent=P["muted"], show_3d=False); cl.addWidget(self._cls_orig, 1)
 
         right_w = QWidget(); right_w.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         rl = QVBoxLayout(right_w); rl.setContentsMargins(0,0,0,0); rl.setSpacing(12)
@@ -215,9 +216,8 @@ class OfflineTab(QWidget):
         cls_outer.addLayout(cl, 1); outer.addWidget(self._cls_w, 1)
         self._cls_w.hide()
 
-    def _on_seg_slider(self, idx):
+    def _on_seg_cb(self, idx):
         self._seg_idx = int(idx)
-        self.seg_label.setText(f"Model {idx + 1} / 4 · {SEGMENTATION_TITLES[idx]}")
         for i, pp in enumerate(self.output_panels):
             pp.setVisible(i == idx)
         if self._arrs and len(self._arrs) > idx + 1 and self._arrs[idx + 1] is not None:
@@ -498,7 +498,6 @@ class OnlineTab(QWidget):
         self.view_cb.addItem("Segmentation", 0)
         self.view_cb.addItem("Point cloud depth", 1)
         self.view_cb.addItem("Depth + segmentation", 2)
-        self.view_cb.addItem("PCL normals (vectors)", 3)
         self.view_cb.currentIndexChanged.connect(self._on_view_changed)
         out.add(self.view_cb)
 
@@ -620,8 +619,6 @@ class OnlineTab(QWidget):
 
     def _on_pcl_ready(self, img):
         self._pcl_image = img
-        if self.view_cb.currentData() == 3 and img is not None:
-            self.res_p.set_image(img, "PCL NORMALS", (60, 170, 145), animated=False)
         if self._pcl_win is not None and self._pcl_win.isVisible() and img is not None:
             self._show_pcl_window_image(img)
 
@@ -684,15 +681,6 @@ class OnlineTab(QWidget):
                 self._cloud_image, "POINT CLOUD Z", (60, 170, 145),
                 self._cloud_metrics, animated=False
             )
-            return
-
-        if self.view_cb.currentData() == 3:
-            self.res_p._tlbl.setText("Output: PCL normals")
-            if self._pcl_image is None:
-                self.res_p._ph()
-                self.status_msg.emit("Waiting for image and point cloud with identical timestamps.")
-                return
-            self.res_p.set_image(self._pcl_image, "PCL NORMALS", (60, 170, 145), animated=False)
             return
 
         self.res_p._tlbl.setText("Output: Depth + segmentation")
